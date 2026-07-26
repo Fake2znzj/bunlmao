@@ -14,18 +14,14 @@ def run_dashboard(port=3000, config=None, node_missing=False):
     config = config or {}
     public_dir = ROOT / "src/web/public"
 
-    # Try Flask, fallback to minimal HTTP
+    # Try Flask, fallback to minimal HTTP (no pip install to avoid DNS timeout on nvnmc.top)
     try:
         from flask import Flask, send_from_directory, jsonify, Response
-    except ImportError:
-        print("Flask not installed, installing...")
-        try:
-            import subprocess
-            subprocess.run([sys.executable, "-m", "pip", "install", "flask", "--break-system-packages", "-q"], timeout=60)
-            from flask import Flask, send_from_directory, jsonify, Response
-        except Exception as e:
-            print(f"Flask install failed: {e}, using minimal HTTP server")
-            return run_minimal_http(port, config, node_missing)
+    except ImportError as e:
+        print(f"Flask not available ({e}), using minimal HTTP server (no pip install to avoid DNS fail)")
+        # Don't try pip install here - nvnmc.top DNS often fails for pypi.org, will timeout 60s
+        # Use minimal HTTP directly to keep online
+        return run_minimal_http_api(port, config, node_missing)
 
     app = Flask(__name__, static_folder=str(public_dir))
 
@@ -303,6 +299,131 @@ def run_dashboard(port=3000, config=None, node_missing=False):
     print(f"[Python Dashboard] Static dir: {public_dir}")
     # Disable reloader, enable threaded
     app.run(host="0.0.0.0", port=port, debug=False, threaded=True, use_reloader=False)
+
+
+def run_minimal_http_api(port, config, node_missing=False):
+    """Enhanced minimal HTTP with API support for 0-175ms + proxy fetcher (no Flask needed)"""
+    from http.server import HTTPServer, BaseHTTPRequestHandler
+    import json as js
+    import urllib.parse
+
+    # Try to import requests for proxy fetching
+    try:
+        import requests
+        HAS_REQUESTS = True
+    except:
+        HAS_REQUESTS = False
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            parsed = urllib.parse.urlparse(self.path)
+            path = parsed.path
+            query = urllib.parse.parse_qs(parsed.query)
+
+            if path == "/" or path == "/index.html":
+                self.send_response(200)
+                self.send_header("Content-type", "text/html; charset=utf-8")
+                self.end_headers()
+                html = f"""
+                <html><head><meta charset="utf-8"><title>Antares - Minimal 0-175ms</title>
+                <style>
+                body{{font-family:system-ui;background:#0f0f10;color:#e2e8f0;padding:20px}}
+                .card{{background:#1e1e20;border:1px solid #333;border-radius:12px;padding:20px;margin-bottom:16px}}
+                code{{background:#2a2a2e;padding:6px 10px;border-radius:6px;display:block;margin:8px 0;color:#22d3ee;word-break:break-all}}
+                .btn{{background:#7c3aed;color:white;padding:10px 18px;border-radius:8px;display:inline-block;margin:5px;text-decoration:none}}
+                .btn-green{{background:#16a34a}}
+                </style></head>
+                <body>
+                <h2>✅ Antares Minimal HTTP - Online (No Flask, No DNS needed)</h2>
+                <p>Port: {port} | Mode: Python minimal (Flask not available, pypi.org DNS fail on nvnmc.top) | Uptime kept online</p>
+                <p>Node crash? Check logs for MODULE_NOT_FOUND - need npm install. This minimal server keeps Online.</p>
+                <div class="card">
+                <h3>📦 Fix npm install (MODULE_NOT_FOUND)</h3>
+                <p>Trong Console gõ: <code>npm install</code> đợi 1-2 phút rồi Restart</p>
+                </div>
+                <div class="card">
+                <h3>🌏 Proxy API - 0-175ms Target</h3>
+                <p><a class="btn" href="/api/proxies/free-sources">Free Sources List (VN/SG/JP 0-175ms)</a></p>
+                <p><a class="btn btn-green" href="/api/proxies/fetch-vn?limit=50">Fetch VN 0-175ms (50)</a></p>
+                <p><a class="btn" href="/api/system">System Info</a> <a class="btn" href="/api/bots">Bots</a></p>
+                </div>
+                <div class="card">
+                <h3>🔗 External</h3>
+                <p>Ngrok URL của bạn vẫn hoạt động (nếu có NGROK_TOKEN)</p>
+                <p>Config: {len(config.get("bots", []))} bots, {len(config.get("proxies", []))} proxies</p>
+                </div>
+                </body></html>
+                """
+                self.wfile.write(html.encode('utf-8'))
+                return
+
+            if path == "/api/proxies/free-sources":
+                self.send_response(200)
+                self.send_header("Content-type", "application/json")
+                self.end_headers()
+                sources = {
+                    "ok": True,
+                    "asiaLowPing": True,
+                    "maxMs": 175,
+                    "description": "Free proxy 0-175ms - No Flask mode",
+                    "sources": [
+                        {"id": "vn-proxyscrape", "name": "VN Elite 0-175ms", "url": "https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&proxy_format=ipport&format=text&protocol=socks4%2Csocks5&anonymity=elite%2Canonymous%2Ctransparent&country=vn", "tag": "vn-0-175ms", "country": "VN"},
+                        {"id": "sg-proxyscrape", "name": "SG 0-175ms", "url": "https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&proxy_format=ipport&format=text&protocol=socks4%2Csocks5&anonymity=elite%2Canonymous&country=sg", "tag": "sg-0-175ms", "country": "SG"},
+                        {"id": "asia-mixed", "name": "Asia Mixed VN/SG/JP/ID 0-175ms", "url": "https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&proxy_format=ipport&format=text&protocol=socks4%2Csocks5&anonymity=elite%2Canonymous&country=vn%2Csg%2Cjp%2Cid%2Cth", "tag": "asia-0-175ms", "country": "VN,SG,JP,ID,TH"}
+                    ]
+                }
+                self.wfile.write(js.dumps(sources).encode())
+                return
+
+            if path == "/api/proxies/fetch-vn":
+                self.send_response(200)
+                self.send_header("Content-type", "application/json")
+                self.end_headers()
+                limit = int(query.get("limit", ["50"])[0])
+                # Fetch via requests if available, else via urllib
+                try:
+                    if HAS_REQUESTS:
+                        import requests
+                        url = "https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&proxy_format=ipport&format=text&protocol=socks4%2Csocks5&anonymity=elite%2Canonymous%2Ctransparent&country=vn"
+                        resp = requests.get(url, timeout=10)
+                        lines = [l.strip() for l in resp.text.splitlines() if l.strip()][:limit]
+                        result = {"ok": True, "count": len(lines), "proxies": lines[:10], "totalReceived": len(resp.text.splitlines()), "note": "Fetched in minimal mode, save manually or use full version"}
+                    else:
+                        result = {"ok": False, "error": "requests not available"}
+                except Exception as e:
+                    result = {"ok": False, "error": str(e)}
+                self.wfile.write(js.dumps(result).encode())
+                return
+
+            if path == "/api/system":
+                self.send_response(200)
+                self.send_header("Content-type", "application/json")
+                self.end_headers()
+                self.wfile.write(js.dumps({"ok": True, "mode": "minimal-http-no-flask", "port": port, "bots": len(config.get("bots", [])), "proxies": len(config.get("proxies", [])), "note": "Flask not installed due to DNS fail pypi.org, using minimal HTTP to keep online"}).encode())
+                return
+
+            if path == "/api/bots":
+                self.send_response(200)
+                self.send_header("Content-type", "application/json")
+                self.end_headers()
+                bots = config.get("bots", [])
+                self.wfile.write(js.dumps(bots).encode())
+                return
+
+            # Default 404 for other paths
+            self.send_response(404)
+            self.send_header("Content-type", "application/json")
+            self.end_headers()
+            self.wfile.write(js.dumps({"error": "Not found in minimal mode", "path": path}).encode())
+
+        def log_message(self, *args):
+            pass
+
+    server = HTTPServer(("0.0.0.0", port), Handler)
+    print(f"[Minimal HTTP API] Running on 0.0.0.0:{port} - No Flask needed, 0-175ms API included, keeping online")
+    server.serve_forever()
+
+
 
 def run_minimal_http(port, config, node_missing):
     from http.server import HTTPServer, BaseHTTPRequestHandler

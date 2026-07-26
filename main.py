@@ -639,15 +639,19 @@ def run_python_fallback_dashboard(port, cfg, reason="Node.js không khả dụng
     try:
         from src.python.dashboard import run_dashboard
         run_dashboard(port=port, config=cfg, node_missing=True)
+        return
     except ImportError as e:
-        rprint(f"[red]Flask không có: {e}, thử cài...[/red]")
-        try:
-            subprocess.run([sys.executable, "-m", "pip", "install", "flask", "--break-system-packages", "-q"], timeout=60)
-            from src.python.dashboard import run_dashboard
-            run_dashboard(port=port, config=cfg, node_missing=True)
-            return
-        except Exception as e2:
-            rprint(f"[red]Fallback dashboard import lỗi: {e2}[/red]")
+        rprint(f"[yellow]Flask không có ({e}), dùng minimal HTTP API (không cần pip install, tránh DNS fail pypi.org)[/yellow]")
+    except Exception as e:
+        rprint(f"[yellow]Dashboard import lỗi: {e}, dùng minimal HTTP[/yellow]")
+
+    # Try minimal HTTP API directly (no Flask, no pip)
+    try:
+        from src.python.dashboard import run_minimal_http_api
+        run_minimal_http_api(port=port, config=cfg, node_missing=True)
+        return
+    except Exception as e:
+        rprint(f"[red]Minimal API import lỗi: {e}[/red]")
 
         # Ultimate fallback: simple HTTP server that stays alive
         rprint("[yellow]Chạy HTTP server tối thiểu để giữ online...[/yellow]")
@@ -712,7 +716,7 @@ def main():
     rprint(f"[dim]Port resolve: cli={args.port} env PORT={os.getenv('PORT')} SERVER_PORT={os.getenv('SERVER_PORT')} config={cfg.get('settings', {}).get('webPort')} => using {port}[/dim]" if HAS_RICH else f"Using port {port}")
 
     # Check ngrok enable from env too
-    ngrok_enabled = args.ngrok or os.getenv("NGROK_ENABLED") == "1" or os.getenv("USE_NGROK") == "1" or True  # auto-enable if token present
+    ngrok_enabled = args.ngrok or os.getenv("NGROK_ENABLED") == "1" or os.getenv("USE_NGROK") == "1"
     # Default hardcoded token from user (can be overridden by env)
     DEFAULT_NGROK_TOKEN = "3H2xhozKMBmcKgy9oO6n46kNQSp_4MJr3Edf6kwBR5mg4Ps1z"
     ngrok_token = args.ngrok_token or os.getenv("NGROK_AUTHTOKEN") or os.getenv("NGROK_TOKEN") or DEFAULT_NGROK_TOKEN

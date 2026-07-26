@@ -322,7 +322,6 @@ class WebDashboard {
     });
 
     this.expressApp.post('/api/proxies/fetch/free', async (req, res) => {
-    this.expressApp.post('/api/proxies/fetch/free', async (req, res) => {
       const { url, tag, limit, type, autoTest } = req.body || {};
       if (!url) return res.status(400).json({ ok: false, error: 'url required - API endpoint for proxy list' });
       try {
