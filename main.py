@@ -484,11 +484,17 @@ class NodeProcessManager:
     def start(self):
         env = os.environ.copy()
         env["PORT"] = str(self.port)
+        env["BIND_HOST"] = os.getenv("BIND_HOST", "0.0.0.0")
+        env["HOST"] = "0.0.0.0"
         if "NODE_OPTIONS" not in env:
             env["NODE_OPTIONS"] = "--max-old-space-size=512"
 
         cmd = [self.node_bin, "main.js"]
-        rprint(f"[green]⬡ Đang khởi động Node engine: {' '.join(cmd)} trên port {self.port}[/green]" if HAS_RICH else f"Starting Node: {' '.join(cmd)} port {self.port}")
+        rprint(f"[green]⬡ Đang khởi động Node engine: {' '.join(cmd)} trên {env['BIND_HOST']}:{self.port}[/green]" if HAS_RICH else f"Starting Node: {' '.join(cmd)} on {env['BIND_HOST']}:{self.port}")
+        # Extra info for Pterodactyl debug
+        server_ip = env.get("SERVER_IP") or env.get("P_SERVER_IP") or "play1.nvnmc.top"
+        server_port = env.get("SERVER_PORT") or str(self.port)
+        rprint(f"[dim]  Container bind: 0.0.0.0:{self.port} | Pterodactyl allocation: {server_ip}:{server_port} | External: http://{server_ip}:{server_port}[/dim]" if HAS_RICH else f"Bind 0.0.0.0:{self.port} -> External http://{server_ip}:{server_port}")
 
         try:
             self.proc = subprocess.Popen(
