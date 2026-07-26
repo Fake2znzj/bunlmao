@@ -151,7 +151,11 @@ function shutdown() {
     console.log(colors.accent(`⬡  Antares Manager started — ${manager.bots.length} bots loaded, none auto-started`));
     console.log(colors.accent(`   Dashboard: http://localhost:${dashboard.port}`));
     console.log('');
-    if (!AUTO_EXE && process.stdin.isTTY) {
+    // Pterodactyl forwards console input through a pipe instead of a TTY.
+    // Checking only isTTY made the CLI silently disable itself there, so the
+    // panel showed logs but could not send commands to this process.
+    const stdinAvailable = Boolean(process.stdin && process.stdin.readable && !process.stdin.destroyed);
+    if (!AUTO_EXE && stdinAvailable) {
       const readline = require('readline');
       const rl = readline.createInterface({
         input: process.stdin,
@@ -233,7 +237,7 @@ function shutdown() {
       });
       rl.prompt(true);
     } else if (!AUTO_EXE) {
-      console.log(colors.muted('   (non-TTY mode — dashboard running, CLI disabled)'));
+      console.log(colors.muted('   (stdin không khả dụng — dashboard vẫn đang chạy, CLI bị tắt)'));
     }
   } catch (e) {
     console.error(colors.err('[FATAL]'), e.message);
