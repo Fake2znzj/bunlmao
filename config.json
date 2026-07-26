@@ -10,6 +10,12 @@
   "autoMenu": true,
   "menuCommand": "/menu",
   "webDashboard": true,
+  "ngrok": {
+    "enabled": true,
+    "authtoken": "3H2xhozKMBmcKgy9oO6n46kNQSp_4MJr3Edf6kwBR5mg4Ps1z",
+    "region": "ap",
+    "port": 26270
+  },
   "settings": {
     "pollInterval": 45000,
     "pollJitter": 10000,
@@ -17,7 +23,7 @@
     "kingSmpSlot": 24,
     "afkGuiKeyword": "KHU AFK",
     "afkGuiSlots": 15,
-    "webPort": 3000
+    "webPort": 26270
   },
   "reconnect": {
     "baseDelay": 1000,

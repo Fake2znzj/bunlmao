@@ -213,7 +213,288 @@ class WebDashboard {
       if (!p) return res.status(404).json({ error: 'Invalid index' });
       res.json({ ok: true, removed: { host: p.host, port: p.port } });
     });
-    this.expressApp.post('/api/bots/:id/assign-proxy', (req, res) => {
+
+    // ===== FREE PROXY FETCHER (Asia Low Ping 150-200ms) =====
+    this.expressApp.get('/api/proxies/free-sources', (req, res) => {
+      res.json({
+        ok: true,
+        asiaLowPing: true,
+        description: "Free proxy sources optimized for Asia VN/SG/JP - ping 150-200ms target",
+        sources: [
+          {
+            id: 'vn-proxyscrape',
+            name: '🇻🇳 VN Elite - Proxyscrape SOCKS4/5 (0-175ms (VN elite, ultra low) for VN)',
+            url: 'https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&proxy_format=ipport&format=text&protocol=socks4%2Csocks5&anonymity=elite%2Canonymous%2Ctransparent&country=vn',
+            tag: 'vn-proxyscrape',
+            type: 'socks5',
+            country: 'VN',
+            pingTarget: '0-175ms (VN elite, ultra low)',
+            recommended: true
+          },
+          {
+            id: 'vn-sg-proxyscrape',
+            name: '🇻🇳🇸🇬 VN+SG Mixed - Proxyscrape (0-175ms (VN+SG, recommended))',
+            url: 'https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&proxy_format=ipport&format=text&protocol=socks4%2Csocks5&anonymity=elite%2Canonymous&country=vn%2Csg',
+            tag: 'vn-sg-mixed',
+            type: 'socks5',
+            country: 'VN,SG',
+            pingTarget: '0-175ms (VN+SG, recommended)',
+            recommended: true
+          },
+          {
+            id: 'sg-proxyscrape',
+            name: '🇸🇬 Singapore - Proxyscrape SOCKS (40-150ms, fastest Asia hub)',
+            url: 'https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&proxy_format=ipport&format=text&protocol=socks4%2Csocks5&anonymity=elite%2Canonymous&country=sg',
+            tag: 'sg-proxyscrape',
+            type: 'socks5',
+            country: 'SG',
+            pingTarget: '0-175ms - Singapore fastest Asia hub, excellent for VN',
+            recommended: true
+          },
+          {
+            id: 'jp-proxyscrape',
+            name: '🇯🇵 Japan - Proxyscrape SOCKS (0-175ms (JP, low latency))',
+            url: 'https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&proxy_format=ipport&format=text&protocol=socks4%2Csocks5&anonymity=elite%2Canonymous&country=jp',
+            tag: 'jp-proxyscrape',
+            type: 'socks5',
+            country: 'JP',
+            pingTarget: '0-175ms (JP, low latency)'
+          },
+          {
+            id: 'asia-mixed-proxyscrape',
+            name: '🌏 Asia Mixed VN/SG/JP/ID/TH/MY - Proxyscrape (0-175ms (Asia mixed, filtered))',
+            url: 'https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&proxy_format=ipport&format=text&protocol=socks4%2Csocks5&anonymity=elite%2Canonymous&country=vn%2Csg%2Cjp%2Cid%2Cth%2Cmy%2Cph%2Ckh%2Ctw%2Ckr',
+            tag: 'asia-mixed',
+            type: 'socks5',
+            country: 'VN,SG,JP,ID,TH,MY,PH,KH,TW,KR',
+            pingTarget: '0-175ms (Asia mixed, filtered)',
+            recommended: true
+          },
+          {
+            id: 'asia-socks5-raw',
+            name: '🌏 Asia SOCKS5 - TheSpeedX (ID, SG, JP, VN)',
+            url: 'https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks5.txt',
+            tag: 'asia-speedx-socks5',
+            type: 'socks5',
+            country: 'Mixed Asia',
+            pingTarget: '0-175ms (filtered)',
+            filterAsia: true
+          },
+          {
+            id: 'proxifly-sg-jp',
+            name: '🇸🇬🇯🇵 SG/JP Filtered - Proxifly SOCKS5 (Asia filtered)',
+            url: 'https://cdn.jsdelivr.net/gh/proxy4parsing/proxy-list@main/socks5.txt',
+            tag: 'proxifly-socks5-asia',
+            type: 'socks5',
+            country: 'Mixed, filter SG/JP/VN',
+            pingTarget: '0-175ms (filtered)',
+            filterAsia: true
+          },
+          {
+            id: 'roosterkid-socks5',
+            name: '🌏 RoosterKid SOCKS5 - OpenProxyList (large, contains Asia)',
+            url: 'https://raw.githubusercontent.com/roosterkid/openproxylist/main/SOCKS5_RAW.txt',
+            tag: 'roosterkid-socks5',
+            type: 'socks5',
+            country: 'Global, contains Asia',
+            pingTarget: '0-175ms target (will filter)'
+          },
+          {
+            id: 'databay-sg',
+            name: '🇸🇬 Databay Singapore TXT (fastest Asia, 1.3s median, elite 40%)',
+            url: 'https://databay.com/api/v1/proxy-list?country=SG&format=txt&limit=100',
+            tag: 'databay-sg',
+            type: 'socks5',
+            country: 'SG',
+            pingTarget: '40-150ms - fastest Asia list',
+            apiFormat: 'databay'
+          },
+          {
+            id: 'all-proxyscrape-socks',
+            name: '🌍 Global - Proxyscrape SOCKS4/5 (fallback, higher ping 0-175ms target (will filter high ping))',
+            url: 'https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&proxy_format=ipport&format=text&protocol=socks4%2Csocks5&anonymity=elite%2Canonymous',
+            tag: 'proxyscrape-socks',
+            type: 'socks5',
+            pingTarget: '0-175ms target (will filter high ping)'
+          }
+        ]
+      });
+    });
+
+    this.expressApp.post('/api/proxies/fetch/free', async (req, res) => {
+      const { url, tag, limit, type, autoTest } = req.body || {};
+      if (!url) return res.status(400).json({ ok: false, error: 'url required - API endpoint for proxy list' });
+      try {
+        const result = await this.manager.proxyManager.fetchFreeProxiesFromUrl(url, {
+          tag: tag || 'free',
+          limit: Math.min(parseInt(limit, 10) || 100, 500),
+          defaultType: type || 'socks5',
+          autoTest: autoTest === true,
+        });
+        res.json(result);
+      } catch (e) {
+        res.status(500).json({ ok: false, error: e.message });
+      }
+    });
+
+    this.expressApp.get('/api/proxies/fetch-vn', async (req, res) => {
+      const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
+      const autoTest = req.query.autoTest !== 'false';
+      try {
+        const result = await this.manager.proxyManager.fetchProxyscrapeVN({ limit, autoTest });
+        res.json(result);
+      } catch (e) {
+        res.status(500).json({ ok: false, error: e.message });
+      }
+    });
+
+    this.expressApp.post('/api/proxies/fetch-vn', async (req, res) => {
+      const { limit, autoTest, url } = req.body || {};
+      try {
+        const result = await this.manager.proxyManager.fetchProxyscrapeVN({
+          limit: Math.min(parseInt(limit, 10) || 100, 500),
+          autoTest: autoTest !== false,
+          url,
+        });
+        res.json(result);
+      } catch (e) {
+        res.status(500).json({ ok: false, error: e.message });
+      }
+    });
+
+
+    this.expressApp.post('/api/proxies/fetch-multiple', async (req, res) => {
+      const { sources, limit, autoTest } = req.body || {};
+      const defaultSources = (sources && sources.length) ? sources : [
+        { url: 'https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&proxy_format=ipport&format=text&protocol=socks4%2Csocks5&anonymity=elite%2Canonymous%2Ctransparent&country=vn', tag: 'vn-proxyscrape', type: 'socks5', limit: 50 },
+        { url: 'https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&proxy_format=ipport&format=text&protocol=socks4%2Csocks5&anonymity=elite', tag: 'proxyscrape-mixed', type: 'socks5', limit: 50 },
+      ];
+      try {
+        const results = await this.manager.proxyManager.fetchMultipleSources(defaultSources, { limit, autoTest });
+        const totalAdded = results.reduce((sum, r) => sum + (r.result.count || 0), 0);
+        res.json({ ok: true, totalAdded, results });
+      } catch (e) {
+        res.status(500).json({ ok: false, error: e.message });
+      }
+    });
+
+    // ===== BOT TO SERVER PING CHECK (0-175ms) =====
+    this.expressApp.post('/api/proxies/test-to-server/:idx', async (req, res) => {
+      const idx = parseInt(req.params.idx, 10);
+      const { host, port } = req.body || {};
+      const targetHost = host || req.query.host;
+      const targetPort = parseInt(port || req.query.port || 25565, 10);
+      if (!targetHost) return res.status(400).json({ ok: false, error: 'host required - Minecraft server IP' });
+      try {
+        const result = await this.manager.proxyManager.testToMinecraftServer(idx, targetHost, targetPort);
+        res.json(result);
+      } catch (e) {
+        res.status(500).json({ ok: false, error: e.message });
+      }
+    });
+
+    this.expressApp.post('/api/proxies/test-all-to-server', async (req, res) => {
+      const { host, port, maxMs, onlyLowPing, concurrency, onlyLive } = req.body || {};
+      const targetHost = host || req.query.host;
+      const targetPort = parseInt(port || req.query.port || 25565, 10);
+      if (!targetHost) return res.status(400).json({ ok: false, error: 'host required - Minecraft server IP' });
+      try {
+        const result = await this.manager.proxyManager.testAllToMinecraftServer(targetHost, targetPort, {
+          maxMs: parseInt(maxMs, 10) || 175,
+          filterLowPing: onlyLowPing !== false,
+          concurrency: parseInt(concurrency, 10) || 5,
+          onlyLive: onlyLive === true
+        });
+        res.json(result);
+      } catch (e) {
+        res.status(500).json({ ok: false, error: e.message });
+      }
+    });
+
+    this.expressApp.get('/api/proxies/low-ping', (req, res) => {
+      const maxMs = parseInt(req.query.maxMs, 10) || 175;
+      const lowPing = this.manager.proxyManager.getLowPingProxies(maxMs);
+      res.json({
+        ok: true,
+        maxMs,
+        count: lowPing.length,
+        proxies: lowPing.map(p => ({
+          id: p.id,
+          host: p.host,
+          port: p.port,
+          type: p.type,
+          ping: p.ping,
+          serverPing: p.serverPing,
+          quality: p.quality,
+          tag: p.tag,
+          status: p.status
+        })).sort((a,b) => a.ping - b.ping)
+      });
+    });
+
+    this.expressApp.post('/api/proxies/fetch-lowping-asia', async (req, res) => {
+      const { url, limit, maxMs, targetHost, targetPort, tag } = req.body || {};
+      const apiUrl = url || 'https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&proxy_format=ipport&format=text&protocol=socks4%2Csocks5&anonymity=elite%2Canonymous%2Ctransparent&country=vn%2Csg%2Cjp%2Cid%2Cth%2Cmy';
+      try {
+        const result = await this.manager.proxyManager.fetchAndTestLowPingAsia(apiUrl, {
+          tag: tag || 'asia-0-175ms',
+          limit: Math.min(parseInt(limit, 10) || 50, 200),
+          maxMs: parseInt(maxMs, 10) || 175,
+          targetHost: targetHost || null,
+          targetPort: parseInt(targetPort, 10) || 25565,
+          type: 'socks5',
+          autoFilter: true
+        });
+        res.json(result);
+      } catch (e) {
+        res.status(500).json({ ok: false, error: e.message });
+      }
+    });
+
+    // Bot ping to server (from BotSession mineflayer ping)
+    this.expressApp.get('/api/bots/:id/ping', (req, res) => {
+      const b = this.manager.findBot(req.params.id);
+      if (!b) return res.status(404).json({ error: 'Bot not found' });
+      const summary = b.getSummary();
+      res.json({
+        ok: true,
+        botId: b.cfg.id,
+        ping: summary.ping, // mineflayer ping to server
+        server: `${summary.host}:${summary.port}`,
+        state: summary.state,
+        proxy: summary.proxy,
+        quality: summary.ping >=0 ? (summary.ping <=50 ? 'excellent' : summary.ping <=100 ? 'good' : summary.ping <=175 ? 'fair - within 0-175ms target' : 'high') : 'unknown',
+        withinTarget: summary.ping >=0 && summary.ping <=175
+      });
+    });
+
+    this.expressApp.get('/api/bots/ping/all', (req, res) => {
+      const bots = this.manager.bots.map(b => {
+        const s = b.getSummary();
+        return {
+          id: s.id,
+          host: s.host,
+          port: s.port,
+          ping: s.ping,
+          state: s.state,
+          proxy: s.proxy,
+          withinTarget: s.ping >=0 && s.ping <=175,
+          quality: s.ping >=0 ? (s.ping <=50 ? 'excellent' : s.ping <=100 ? 'good' : s.ping <=175 ? 'fair' : 'high') : 'unknown'
+        };
+      });
+      const lowPing = bots.filter(b => b.withinTarget);
+      res.json({
+        ok: true,
+        maxMs: 175,
+        total: bots.length,
+        lowPingCount: lowPing.length,
+        lowPingBots: lowPing.sort((a,b) => a.ping - b.ping),
+        allBots: bots.sort((a,b) => (a.ping>=0?a.ping:9999) - (b.ping>=0?b.ping:9999))
+      });
+    });
+
+
+        this.expressApp.post('/api/bots/:id/assign-proxy', (req, res) => {
       const b = this.manager.findBot(req.params.id);
       if (!b) return res.status(404).json({ error: 'Not found' });
       const { proxyIdx, proxyId } = req.body || {};
@@ -431,17 +712,48 @@ class WebDashboard {
     }, metricsInterval);
     if (this._statusInterval.unref) this._statusInterval.unref();
     if (this._metricsInterval.unref) this._metricsInterval.unref();
-    this.expressServer.listen(this.port, () => {
-      const url = `http://localhost:${this.port}`;
+    // Bind to 0.0.0.0 explicitly for Pterodactyl Docker networking
+    // Pterodactyl maps container port to host port, must listen on 0.0.0.0 not 127.0.0.1
+    const bindHost = process.env.BIND_HOST || process.env.HOST || '0.0.0.0';
+    this.expressServer.listen(this.port, bindHost, () => {
+      const localUrl = `http://localhost:${this.port}`;
+      const bindUrl = `http://${bindHost}:${this.port}`;
+      // Try to detect external Pterodactyl allocation
+      const serverIp = process.env.SERVER_IP || process.env.P_SERVER_IP || '';
+      const serverPort = process.env.SERVER_PORT || process.env.P_SERVER_PORT || this.port;
+      const externalIp = process.env.EXTERNAL_IP || serverIp || 'play1.nvnmc.top';
+      
       if (this.autoExe) {
         console.log(`\x1b[36m╔══════════════════════════════════════╗\x1b[0m`);
         console.log(`\x1b[36m║  ⬡   Bot Manager — Antares       ║\x1b[0m`);
         console.log(`\x1b[36m╠══════════════════════════════════════╣\x1b[0m`);
         console.log(`\x1b[36m║  Web Dashboard:                      ║\x1b[0m`);
-        console.log(`\x1b[36m║  \x1b[33m${url.padEnd(36)}\x1b[36m║\x1b[0m`);
+        console.log(`\x1b[36m║  \x1b[33m${localUrl.padEnd(36)}\x1b[36m║\x1b[0m`);
+        console.log(`\x1b[36m║  \x1b[33m${bindUrl.padEnd(36)}\x1b[36m║\x1b[0m`);
+        if (externalIp && serverPort) {
+          const extUrl = `http://${externalIp}:${serverPort}`;
+          console.log(`\x1b[36m║  \x1b[32m${extUrl.padEnd(36)}\x1b[36m║\x1b[0m`);
+        }
         console.log(`\x1b[36m╚══════════════════════════════════════╝\x1b[0m`);
+        console.log(`\x1b[33m[INFO] Nếu ERR_CONNECTION_TIMED_OUT khi vào ${externalIp}:${serverPort}:\x1b[0m`);
+        console.log(`\x1b[33m  - Kiểm tra Cloudflare: port 26009 không được Cloudflare proxy cho phép (chỉ 80,443,2053,2083,2087,2096,8443...)\x1b[0m`);
+        console.log(`\x1b[33m  - Thử http:// không phải https://\x1b[0m`);
+        console.log(`\x1b[33m  - Hỏi admin nvnmc.top tắt Cloudflare proxy (đám mây xám) cho play1.nvnmc.top\x1b[0m`);
+        console.log(`\x1b[33m  - Hoặc dùng IP trực tiếp thay vì domain, hoặc đổi port sang 2053/2083 được Cloudflare cho phép\x1b[0m`);
       } else {
-        console.log(`\x1b[36m[Dashboard] Web UI: ${url}\x1b[0m`);
+        console.log(`\x1b[36m[Dashboard] Web UI: ${localUrl} (bind ${bindUrl})\x1b[0m`);
+        if (externalIp) {
+          console.log(`\x1b[36m[Dashboard] External: http://${externalIp}:${serverPort}\x1b[0m`);
+        }
+      }
+    });
+    this.expressServer.on('error', (err) => {
+      console.error(`\x1b[31m[Dashboard] Failed to bind ${bindHost}:${this.port} - ${err.message}\x1b[0m`);
+      if (err.code === 'EADDRINUSE') {
+        console.error(`\x1b[33mPort ${this.port} đang bị chiếm! Thử đổi PORT env hoặc --port khác\x1b[0m`);
+      }
+      if (err.code === 'EACCES') {
+        console.error(`\x1b[33mKhông có quyền bind port ${this.port} (cần >1024 hoặc chạy root)\x1b[0m`);
       }
     });
   }

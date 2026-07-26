@@ -843,6 +843,15 @@ function renderProxyTab(botParam) {
   html += '<button class="btn btn-primary btn-sm" onclick="openModal(\'overlay-add-proxy\')" aria-label="Thêm proxy">+ Add Proxy</button>';
   html += '<button class="btn btn-ghost btn-sm" onclick="testAllProxies()" aria-label="Test tất cả proxy">↳ Test All</button>';
   html += '<button class="btn btn-ghost btn-sm" onclick="upgradeAllProxies()" aria-label="Nâng cấp tất cả proxy">☁ Upgrade All</button></div>';
+  // Asia 0-175ms buttons
+  html += '<div class="proxy-section" style="margin-top:10px;background:linear-gradient(135deg,#1e1e20,#252530);border:1px solid #333;border-radius:10px;padding:10px"><div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">';
+  html += '<span style="font-size:12px;color:var(--text-2);margin-right:6px">🌏 Asia 0-175ms:</span>';
+  html += '<button class="btn btn-primary btn-sm" onclick="fetchVNProxies()" style="background:linear-gradient(135deg,#22c55e,#16a34a)">🇻🇳 VN 0-175ms</button>';
+  html += '<button class="btn btn-ghost btn-sm" onclick="fetchAsiaLowPing()" title="Fetch Asia mixed 0-175ms">🌏 Asia 0-175ms</button>';
+  html += '<button class="btn btn-ghost btn-sm" onclick="fetchLowPingOnly()" title="Lọc proxy 0-175ms hiện có">⚡ Lọc 0-175ms</button>';
+  html += '<button class="btn btn-ghost btn-sm" onclick="testAllToServer()" title="Test tất cả proxy đến server MC, lọc 0-175ms">🎯 Test bot→server 0-175ms</button>';
+  html += '<span class="sp"></span><span style="font-size:11px;color:var(--text-3)">Target 0-175ms: 0-50 excellent 🟢, 51-100 good 🟢, 101-175 fair 🟡</span>';
+  html += '</div></div>';
   html += '<div class="proxy-filter-bar"><div class="proxy-filter-pills">';
   html += `<button class="proxy-filter-pill ${ST._proxyFilter==='all'?'active':''}" onclick="setProxyFilter('all')">All <span class="pill-cnt">${proxies.length}</span></button>`;
   html += `<button class="proxy-filter-pill live ${ST._proxyFilter==='live'?'active':''}" onclick="setProxyFilter('live')">● Live <span class="pill-cnt">${liveCount}</span></button>`;
@@ -945,6 +954,112 @@ function renderProxyTable(proxies, b) {
   html += '</tbody></table></div>';
   return html;
 }
+
+function fetchVNProxies() {
+  toast('Đang fetch proxy VN 0-175ms...', 'info');
+  fetch('/api/proxies/fetch-vn?limit=50&autoTest=true', {method: 'POST'})
+    .then(r=>r.json()).then(d=>{
+      if(d.ok) {
+        toast(`Đã thêm ${d.count} proxy VN, nhận ${d.totalReceived}`, 'ok');
+        // Refresh proxies
+        fetch('/api/proxies').then(r=>r.json()).then(list=>{ ST.proxies=list; renderProxyTab(); });
+      } else {
+        toast('Lỗi fetch VN: '+(d.error||'unknown'), 'err');
+      }
+    }).catch(e=>toast('Lỗi: '+e.message,'err'));
+}
+
+function fetchAsiaLowPing() {
+  toast('Đang fetch Asia mixed 0-175ms (VN/SG/JP/ID/TH)...', 'info');
+  fetch('/api/proxies/fetch-lowping-asia', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({limit: 50, maxMs: 175, tag: 'asia-0-175ms'})
+  }).then(r=>r.json()).then(d=>{
+    if(d.ok) {
+      const added = d.fetchResult ? d.fetchResult.count : (d.totalLowPing || d.count || 0);
+      toast(`Asia 0-175ms: ${added} proxy, low ping ${d.totalLowPing||0}`, 'ok');
+      fetch('/api/proxies').then(r=>r.json()).then(list=>{ ST.proxies=list; renderProxyTab(); });
+    } else {
+      toast('Lỗi fetch Asia: '+(d.error||''), 'err');
+    }
+  }).catch(e=>toast('Lỗi: '+e.message,'err'));
+}
+
+function fetchLowPingOnly() {
+  const maxMs = 175;
+  fetch('/api/proxies/low-ping?maxMs='+maxMs)
+    .then(r=>r.json()).then(d=>{
+      if(d.ok) {
+        toast(`Tìm thấy ${d.count} proxy 0-${maxMs}ms (excellent 0-50, good 51-100, fair 101-175)`, 'ok');
+        // Filter view to show only low ping
+        ST._proxyFilter='live';
+        // Sort by ping
+        ST._proxySort={col:'ping',asc:true};
+        // Show only low ping in UI by temp filtering? For now just render and highlight
+        renderProxyTab();
+        // Optionally show modal with list
+        let html = `<div>Proxy 0-${maxMs}ms: ${d.count} cái<br><br>`;
+        d.proxies.slice(0,20).forEach(p=>{
+          let qual = p.ping<=50?'excellent 🟢':p.ping<=100?'good 🟢':'fair 🟡';
+          html+=`${p.host}:${p.port} - ${p.ping}ms - ${qual} - ${p.tag||''}<br>`;
+        });
+        if(d.count>20) html+=`... và ${d.count-20} cái nữa`;
+        html+='</div>';
+        openMsgModal('Proxy 0-'+maxMs+'ms', html);
+      } else {
+        toast('Lỗi lọc low ping', 'err');
+      }
+    });
+}
+
+function testAllToServer() {
+  const activeBot = ST.bots.find(b=>b.id===ST.activeId) || ST.bots[0];
+  let host = activeBot ? activeBot.host : null;
+  let port = activeBot ? activeBot.port : 25565;
+  if(!host) {
+    host = prompt('Nhập IP server MC để test ping bot->server (VD: java.kingmc.vn):', 'java.kingmc.vn');
+    if(!host) return;
+  }
+  const maxMs = 175;
+  toast(`Đang test tất cả proxy đến ${host}:${port} lọc 0-${maxMs}ms... (có thể 10-30s)`, 'info');
+  fetch('/api/proxies/test-all-to-server', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({host, port, maxMs, onlyLowPing: true, concurrency: 5})
+  }).then(r=>r.json()).then(d=>{
+    if(d.ok) {
+      toast(`Test xong: ${d.totalLowPing}/${d.totalTested} proxy đạt 0-${maxMs}ms đến ${host}`, 'ok');
+      let html = `<div><b>Target:</b> ${d.target} | Max ${d.maxMs}ms | Total low: ${d.totalLowPing}/${d.totalTested}<br>`;
+      html+=`<div style="margin:8px 0">Excellent 0-50ms: ${d.summary.excellent} | Good 51-100ms: ${d.summary.good} | Fair 101-175ms: ${d.summary.fair}</div>`;
+      html+='<div style="max-height:300px;overflow-y:auto;background:#111;padding:8px;border-radius:6px;font-family:monospace;font-size:12px">';
+      (d.lowPingProxies||[]).slice(0,30).forEach(item=>{
+        const p=item.proxy||item;
+        const ping=item.result?item.result.ping:p.ping;
+        let qual=ping<=50?'excellent 🟢':ping<=100?'good 🟢':'fair 🟡';
+        html+=`${p.host||''}:${p.port||''} - ${ping}ms - ${qual}<br>`;
+      });
+      html+='</div></div>';
+      openMsgModal(`Proxy 0-${maxMs}ms đến ${host}`, html);
+      // Refresh proxy list to update pings
+      fetch('/api/proxies').then(r=>r.json()).then(list=>{ ST.proxies=list; renderProxyTab(); });
+    } else {
+      toast('Lỗi test: '+(d.error||''), 'err');
+    }
+  }).catch(e=>toast('Lỗi: '+e.message,'err'));
+}
+
+function openMsgModal(title, html) {
+  const overlay = document.getElementById('overlay-msg');
+  const titleEl = document.getElementById('msg-title');
+  const bodyEl = document.getElementById('overlay-msg-body');
+  if(titleEl) titleEl.textContent = title;
+  if(bodyEl) bodyEl.innerHTML = html;
+  if(overlay) overlay.classList.add('active');
+}
+
+
+
 function testProxy(idx) {
   const row = document.querySelector(`[data-proxy-idx="${idx}"]`);
   if(row) row.style.opacity='0.5';

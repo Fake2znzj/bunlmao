@@ -2,6 +2,7 @@
 const net = require('net');
 const tls = require('tls');
 const http = require('http');
+const https = require('https');
 const { TIMING } = require('./constants');
 const { nowMs } = require('./utils');
 class ProxyManager {
@@ -623,5 +624,311 @@ class ProxyManager {
       }
     }
   }
+
+  // ===== FREE PROXY FETCHER (Proxyscrape API etc) =====
+  _fetchText(url, timeout = 15000) {
+    return new Promise((resolve, reject) => {
+      const lib = url.startsWith('https://') ? https : http;
+      const req = lib.get(url, { timeout }, res => {
+        if (res.statusCode !== 200) {
+          reject(new Error(`HTTP ${res.statusCode} from ${url}`));
+          res.resume();
+          return;
+        }
+        let data = '';
+        res.setEncoding('utf8');
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => resolve(data));
+      });
+      req.on('error', reject);
+      req.on('timeout', () => {
+        req.destroy();
+        reject(new Error(`Timeout fetching ${url}`));
+      });
+    });
+  }
+
+  async fetchFreeProxiesFromUrl(apiUrl, options = {}) {
+    const {
+      tag = 'proxyscrape',
+      limit = 100,
+      defaultType = 'socks5', // proxyscrape returns ip:port without scheme, assume socks5 then auto-detect
+      autoTest = false,
+      countryFilter = null, // e.g. 'vn'
+    } = options;
+
+    try {
+      const rawText = await this._fetchText(apiUrl);
+      if (!rawText || rawText.trim().length < 5) {
+        return { ok: false, error: 'Empty response from API', count: 0 };
+      }
+
+      // Split lines, filter valid ip:port
+      const lines = rawText.split(/[\r\n,]+/).map(s => s.trim()).filter(Boolean);
+      let added = 0;
+      let skipped = 0;
+      let duplicates = 0;
+      const addedEntries = [];
+
+      for (let i = 0; i < lines.length && added < limit; i++) {
+        const line = lines[i];
+        // Basic ip:port validation
+        if (!/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d{1,5}$/.test(line)) {
+          // Try to parse as full proxy URI, if it matches, keep it
+          const parsed = this.parse(line);
+          if (!parsed) {
+            skipped++;
+            continue;
+          }
+        }
+
+        // Build raw proxy string with assumed type if needed
+        let rawProxy = line;
+        if (!line.includes('://')) {
+          rawProxy = `${defaultType}://${line}`;
+        }
+
+        // Optional country filter via geo? For now, we add all, geo will be enriched later
+        // Try add
+        const res = this.add(rawProxy, tag);
+        if (res.ok) {
+          added++;
+          addedEntries.push(res.entry);
+          if (autoTest) {
+            const idx = this.list.findIndex(p => p.id === res.entry.id);
+            if (idx !== -1) {
+              // Test in background, don't await
+              this.test(idx).catch(() => {});
+            }
+          }
+        } else {
+          if (res.msg && res.msg.includes('đã tồn tại')) {
+            duplicates++;
+          } else {
+            skipped++;
+          }
+        }
+      }
+
+      return {
+        ok: true,
+        count: added,
+        skipped,
+        duplicates,
+        totalReceived: lines.length,
+        tag,
+        apiUrl,
+        addedIds: addedEntries.map(e => e.id),
+      };
+    } catch (e) {
+      return { ok: false, error: e.message, count: 0 };
+    }
+  }
+
+  async fetchProxyscrapeVN(options = {}) {
+    // User's specific API: VN elite/anonymous/transparent socks4,socks5
+    const defaultUrl = 'https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&proxy_format=ipport&format=text&protocol=socks4%2Csocks5&anonymity=elite%2Canonymous%2Ctransparent&country=vn';
+    const url = options.url || defaultUrl;
+    const tag = options.tag || 'vn-proxyscrape';
+    const limit = options.limit || 100;
+    const autoTest = options.autoTest !== undefined ? options.autoTest : true;
+
+    // For VN proxies, try socks5 first, then socks4
+    // We'll fetch and add as socks5, background detection will correct to socks4 if needed
+    return this.fetchFreeProxiesFromUrl(url, { tag, limit, defaultType: 'socks5', autoTest });
+  }
+
+  async fetchMultipleSources(sources = [], options = {}) {
+    // sources = [{url, tag, type, limit}, ...]
+    const results = [];
+    for (const src of sources) {
+      const res = await this.fetchFreeProxiesFromUrl(src.url, {
+        tag: src.tag || 'free',
+        limit: src.limit || options.limit || 50,
+        defaultType: src.type || 'socks5',
+        autoTest: options.autoTest || false,
+      });
+      results.push({ source: src, result: res });
+      // Small delay to avoid rate limit
+      await new Promise(r => setTimeout(r, 500));
+    }
+    return results;
+  }
+
+  // ===== ASIA LOW PING 0-175ms FILTER + BOT TO SERVER PING =====
+  static isLowPingAsia(ping, maxMs = 175) {
+    return ping >= 0 && ping <= maxMs;
+  }
+
+  getLowPingProxies(maxMs = 175) {
+    return this.list.filter(p => p.ping >= 0 && p.ping <= maxMs && this._isUsable(p))
+      .sort((a,b) => a.ping - b.ping);
+  }
+
+  // Test proxy to specific Minecraft server (bot -> server ping via proxy)
+  async testToMinecraftServer(idx, targetHost, targetPort = 25565) {
+    const p = this.list[idx];
+    if (!p) return { ok: false, error: 'Invalid index' };
+    const start = Date.now();
+    let sock = null;
+    try {
+      // Connect via proxy to MC server
+      sock = await this.connect(p, targetHost, targetPort);
+      const ping = Date.now() - start;
+      try { sock.destroy(); } catch {}
+      // Update proxy ping with server ping (more relevant)
+      p.serverPing = ping;
+      p.serverHost = `${targetHost}:${targetPort}`;
+      p.lastServerPing = Date.now();
+      this.markLive(idx, ping);
+      return { 
+        ok: true, 
+        ping, 
+        serverPing: ping,
+        type: p.type, 
+        target: `${targetHost}:${targetPort}`,
+        quality: ProxyManager.gradeQuality(ping),
+        isLowPing: ping <= 175,
+        isExcellent: ping <= 50,
+        isGood: ping <= 100
+      };
+    } catch (e) {
+      if (sock) { try { sock.destroy(); } catch {} }
+      const status = e.message.includes('auth') ? 'auth_fail' : e.message.includes('timeout') ? 'timeout' : 'die';
+      this.markDead(idx, status);
+      return { ok: false, error: e.message, status, target: `${targetHost}:${targetPort}` };
+    }
+  }
+
+  async testAllToMinecraftServer(targetHost, targetPort = 25565, options = {}) {
+    const {
+      maxMs = 175,
+      filterLowPing = true,
+      concurrency = 5,
+      onlyLive = false
+    } = options;
+
+    let proxiesToTest = this.list;
+    if (onlyLive) {
+      proxiesToTest = this._getLiveProxies();
+    }
+
+    const results = [];
+    const lowPingResults = [];
+
+    for (let i = 0; i < proxiesToTest.length; i += concurrency) {
+      const batch = proxiesToTest.slice(i, i + concurrency).map(async (proxy) => {
+        const idx = this.list.indexOf(proxy);
+        if (idx === -1) return null;
+        const res = await this.testToMinecraftServer(idx, targetHost, targetPort);
+        return { idx, proxy: this._summarize(proxy, idx), result: res };
+      });
+
+      const batchResults = await Promise.all(batch);
+      for (const r of batchResults) {
+        if (!r) continue;
+        results.push(r);
+        if (r.result.ok && r.result.ping <= maxMs) {
+          lowPingResults.push(r);
+        }
+      }
+      // Small delay to avoid overwhelming
+      await new Promise(r => setTimeout(r, 200));
+    }
+
+    // Sort low ping by ping ascending
+    lowPingResults.sort((a,b) => a.result.ping - b.result.ping);
+
+    return {
+      ok: true,
+      target: `${targetHost}:${targetPort}`,
+      maxMs,
+      totalTested: results.length,
+      totalLowPing: lowPingResults.length,
+      lowPingProxies: lowPingResults,
+      allResults: filterLowPing ? lowPingResults : results,
+      summary: {
+        excellent: lowPingResults.filter(r => r.result.ping <= 50).length,
+        good: lowPingResults.filter(r => r.result.ping > 50 && r.result.ping <= 100).length,
+        fair: lowPingResults.filter(r => r.result.ping > 100 && r.result.ping <= 175).length,
+        totalLow: lowPingResults.length
+      }
+    };
+  }
+
+  async fetchAndTestLowPingAsia(apiUrl, options = {}) {
+    const {
+      tag = 'asia-lowping',
+      limit = 100,
+      maxMs = 175,
+      targetHost = null, // If provided, test to MC server, else test to 1.1.1.1
+      targetPort = 25565,
+      autoFilter = true
+    } = options;
+
+    // First fetch
+    const fetchRes = await this.fetchFreeProxiesFromUrl(apiUrl, {
+      tag,
+      limit: limit * 2, // Fetch more to account for filtering
+      defaultType: options.type || 'socks5',
+      autoTest: false // We'll test manually with filter
+    });
+
+    if (!fetchRes.ok) return fetchRes;
+
+    // Now test fetched proxies
+    const addedIds = fetchRes.addedIds || [];
+    const addedIndexes = addedIds.map(id => this.list.findIndex(p => p.id === id)).filter(idx => idx !== -1);
+
+    let testResults;
+    if (targetHost) {
+      // Test to Minecraft server
+      const tempResults = [];
+      for (const idx of addedIndexes) {
+        const res = await this.testToMinecraftServer(idx, targetHost, targetPort);
+        tempResults.push({ idx, result: res });
+        if (autoFilter && !res.ok) continue;
+      }
+      const lowPing = tempResults.filter(r => r.result.ok && r.result.ping <= maxMs);
+      // Remove high ping proxies if autoFilter
+      if (autoFilter) {
+        for (const r of tempResults) {
+          if (!r.result.ok || r.result.ping > maxMs) {
+            // Keep but mark as high ping? Or remove? Let's keep but marked
+            // Optionally remove high ping: this.removeByIndex(r.idx)
+          }
+        }
+      }
+      testResults = {
+        ok: true,
+        target: `${targetHost}:${targetPort}`,
+        maxMs,
+        totalTested: tempResults.length,
+        totalLowPing: lowPing.length,
+        lowPingProxies: lowPing.sort((a,b) => a.result.ping - b.result.ping),
+        fetchResult: fetchRes
+      };
+    } else {
+      // Test to 1.1.1.1
+      const tempResults = [];
+      for (const idx of addedIndexes) {
+        const res = await this.test(idx);
+        tempResults.push({ idx, result: res });
+      }
+      const lowPing = tempResults.filter(r => r.result.ok && r.result.ping <= maxMs);
+      testResults = {
+        ok: true,
+        maxMs,
+        totalTested: tempResults.length,
+        totalLowPing: lowPing.length,
+        lowPingProxies: lowPing.sort((a,b) => a.result.ping - b.result.ping),
+        fetchResult: fetchRes
+      };
+    }
+
+    return testResults;
+  }
+
+
 }
 module.exports = ProxyManager;

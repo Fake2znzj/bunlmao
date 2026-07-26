@@ -1115,8 +1115,69 @@ class BotSession extends EventEmitter {
         this.log('warn', 'TPA: GUI xác nhận không xuất hiện sau 10s');
       }, TPA_GUI_TIMEOUT);
     });
-    r.register('ping', 'Hiện ping', () => {
-      this.log('sys', `Ping: ${this.state.ping >= 0 ? this.state.ping + 'ms' : 'N/A'}`);
+    r.register('ping', 'Hiện ping (0-175ms target)', () => {
+      const p = this.state.ping;
+      if (p < 0) {
+        this.log('warn', 'Ping: N/A - bot chưa kết nối hoặc chưa có ping');
+        return;
+      }
+      let quality = 'unknown';
+      let emoji = '❓';
+      if (p <= 50) { quality = 'excellent (0-50ms) - cực ngon'; emoji = '🟢'; }
+      else if (p <= 100) { quality = 'good (51-100ms) - ngon'; emoji = '🟢'; }
+      else if (p <= 175) { quality = 'fair (101-175ms) - ok, trong target 0-175ms'; emoji = '🟡'; }
+      else if (p <= 250) { quality = 'high (176-250ms) - hơi cao'; emoji = '🟠'; }
+      else { quality = 'very high (>250ms) - cao, nên đổi proxy'; emoji = '🔴'; }
+      const within = p >=0 && p <=175;
+      this.log('sys', `${emoji} Ping từ bot đến server ${this.cfg.host}:${this.cfg.port}: ${p}ms - ${quality} | Target 0-175ms: ${within ? '✅ ĐẠT' : '❌ KHÔNG ĐẠT'}` + (this.proxy ? ` | Via proxy: ${this.proxy.type}://${this.proxy.host}:${this.proxy.port}` : ' | Direct'));
+    });
+
+    r.register('serverping', 'Check ping bot->server chi tiết + proxy ping', () => {
+      const p = this.state.ping;
+      const proxy = this.proxy;
+      const summary = this.getSummary();
+      this.log('sys', `=== Ping Check Bot->Server (Target 0-175ms) ===`);
+      this.log('sys', `Bot: ${this.cfg.id} (${this.cfg.username}) -> Server: ${this.cfg.host}:${this.cfg.port}`);
+      this.log('sys', `Bot ping (mineflayer): ${p >=0 ? p+'ms' : 'N/A'}`);
+      if (proxy) {
+        this.log('sys', `Proxy: ${proxy.type}://${proxy.host}:${proxy.port} | Proxy ping: ${proxy.ping >=0 ? proxy.ping+'ms' : 'N/A'} | Server ping via proxy: ${proxy.serverPing ? proxy.serverPing+'ms' : 'N/A'}`);
+        this.log('sys', `Proxy status: ${proxy.status} | Quality: ${proxy.quality || 'unknown'} | Geo: ${proxy.geo ? (proxy.geo.countryCode || proxy.geo.country || 'unknown') : 'N/A'}`);
+      } else {
+        this.log('sys', `Proxy: Không dùng (direct)`);
+      }
+      this.log('sys', `State: ${this.state.connState} | Health: ${this.state.health} | Food: ${this.state.food}`);
+      if (p >=0) {
+        if (p <=175) {
+          this.log('ok', `✅ Ping ${p}ms ĐẠT target 0-175ms - ngon!`);
+        } else {
+          this.log('warn', `❌ Ping ${p}ms KHÔNG ĐẠT target 0-175ms - nên đổi proxy Asia low ping (VN/SG/JP)`);
+          this.log('sys', `Gợi ý: Dùng /api/proxies/fetch-vn?limit=50 hoặc /api/proxies/fetch-lowping-asia để lấy proxy 0-175ms`);
+        }
+      }
+    });
+
+    r.register('checkproxy', 'Test proxy ping đến server hiện tại', async () => {
+      if (!this.proxy) {
+        this.log('warn', 'Bot không dùng proxy (direct) - không cần test proxy');
+        return;
+      }
+      const mgr = this.proxyManager;
+      const idx = mgr.list.findIndex(pr => pr.id === this.proxy.id);
+      if (idx === -1) {
+        this.log('err', 'Không tìm thấy proxy trong list');
+        return;
+      }
+      this.log('sys', `Đang test proxy ${this.proxy.type}://${this.proxy.host}:${this.proxy.port} đến server ${this.cfg.host}:${this.cfg.port}...`);
+      try {
+        const res = await mgr.testToMinecraftServer(idx, this.cfg.host, this.cfg.port);
+        if (res.ok) {
+          this.log('ok', `✅ Proxy -> Server ping: ${res.ping}ms | Target 0-175ms: ${res.ping <=175 ? 'ĐẠT' : 'KHÔNG ĐẠT'} | Quality: ${res.quality}`);
+        } else {
+          this.log('err', `❌ Proxy test fail: ${res.error}`);
+        }
+      } catch (e) {
+        this.log('err', `Lỗi test proxy: ${e.message}`);
+      }
     });
     r.register('pos', 'Hiện tọa độ', () => {
       const p = this.state.position;
