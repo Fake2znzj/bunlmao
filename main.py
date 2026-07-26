@@ -28,7 +28,16 @@ ROOT_DIR = Path(__file__).parent.resolve()
 CONFIG_PATH = ROOT_DIR / "config.json"
 
 AUTO_EXE = os.getenv("AUTO_EXE", "0") == "1"
-PORT = int(os.getenv("PORT", "0") or 0) or None
+# Port resolution: will be determined in get_port_from_config with many fallbacks including SERVER_PORT (Pterodactyl)
+PORT = None
+for _env_name in ["PORT", "SERVER_PORT", "P_SERVER_PORT", "PTERODACTYL_PORT", "WEB_PORT"]:
+    _v = os.getenv(_env_name)
+    if _v:
+        try:
+            PORT = int(_v)
+            break
+        except:
+            pass
 
 # Try rich, fallback to plain
 try:
@@ -414,12 +423,55 @@ def ensure_node_modules(no_install=False):
             rprint(f"[red]npm fallback failed: {e2}[/red]")
         return False
 
-def get_port_from_config(cfg):
+def get_port_from_config(cfg, cli_port=None):
+    """Resolve port with priority: cli --port > env PORT/SERVER_PORT > config.json webPort > 3000"""
+    if cli_port:
+        try:
+            return int(cli_port)
+        except:
+            pass
+    # Global PORT already tried env vars
     if PORT:
         return PORT
-    if cfg.get("settings", {}).get("webPort"):
-        return cfg["settings"]["webPort"]
+    # Also check fresh env again (in case changed)
+    for env_name in ["PORT", "SERVER_PORT", "P_SERVER_PORT", "WEB_PORT", "SERVER_MEMORY"]:
+        v = os.getenv(env_name)
+        if v:
+            try:
+                # SERVER_MEMORY is not port, but keep for safety skip
+                if env_name == "SERVER_MEMORY":
+                    continue
+                port = int(v)
+                if 1 <= port <= 65535:
+                    return port
+            except:
+                pass
+    # Check config
+    try:
+        if cfg.get("settings", {}).get("webPort"):
+            return int(cfg["settings"]["webPort"])
+    except:
+        pass
     return 3000
+
+def set_port_in_config(new_port):
+    """Update config.json webPort to new_port so Node engine also uses it"""
+    try:
+        if not CONFIG_PATH.exists():
+            return False
+        with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
+            cfg = json.load(f)
+        if "settings" not in cfg:
+            cfg["settings"] = {}
+        cfg["settings"]["webPort"] = int(new_port)
+        # backup
+        with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
+            json.dump(cfg, f, indent=2, ensure_ascii=False)
+        rprint(f"[green]✅ Đã cập nhật config.json webPort -> {new_port}[/green]")
+        return True
+    except Exception as e:
+        rprint(f"[yellow]Không cập nhật được config.json: {e}[/yellow]")
+        return False
 
 class NodeProcessManager:
     def __init__(self, node_bin, port):
@@ -558,16 +610,26 @@ def run_python_fallback_dashboard(port, cfg, reason="Node.js không khả dụng
 
 def main():
     import argparse
-    parser = argparse.ArgumentParser(description="Antares Python Wrapper")
+    parser = argparse.ArgumentParser(description="Antares Python Wrapper - Port 26009 supported")
     parser.add_argument("--no-install", action="store_true", help="Skip npm install check")
     parser.add_argument("--python-only", action="store_true", help="Run pure Python dashboard (experimental)")
     parser.add_argument("--no-node-download", action="store_true", help="Don't auto-download Node.js if missing")
+    parser.add_argument("--port", type=int, default=None, help="Set dashboard port (e.g. --port 26009) - overrides env and config")
+    parser.add_argument("--set-port", type=int, default=None, help="Set port and save to config.json then run (e.g. --set-port 26009)")
     args = parser.parse_args()
 
     print_banner()
 
     cfg = load_config()
-    port = get_port_from_config(cfg)
+
+    # Handle --set-port: save to config.json first
+    if args.set_port:
+        set_port_in_config(args.set_port)
+        port = int(args.set_port)
+    else:
+        port = get_port_from_config(cfg, cli_port=args.port)
+
+    rprint(f"[dim]Port resolve: cli={args.port} env PORT={os.getenv('PORT')} SERVER_PORT={os.getenv('SERVER_PORT')} config={cfg.get('settings', {}).get('webPort')} => using {port}[/dim]" if HAS_RICH else f"Using port {port}")
 
     if args.python_only:
         rprint("[yellow]⚠ python-only mode - launching Flask dashboard[/yellow]")

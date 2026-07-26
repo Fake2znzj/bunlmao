@@ -101,10 +101,20 @@ else
 fi
 
 echo "🚀 Starting Antares..."
-export PORT=${PORT:-3000}
+# Port priority: cli arg > PORT > SERVER_PORT > 26009 > 3000
+# SERVER_PORT is Pterodactyl allocation (e.g. 26009) - use it if PORT not set
+if [ -z "$PORT" ] && [ -n "$SERVER_PORT" ]; then
+  export PORT=$SERVER_PORT
+  echo "ℹ️ Using Pterodactyl SERVER_PORT as PORT: $PORT"
+fi
+export PORT=${PORT:-26009}
+export SERVER_PORT=${SERVER_PORT:-$PORT}
+echo "📡 Dashboard will run on port: $PORT (config webPort will be updated)"
+echo "   If you want different port: PORT=3000 bash startup.sh or python main.py --port 26009"
+
 # Try python3 first, then python
 if command -v python3 >/dev/null 2>&1; then
-  python3 main.py
+  python3 main.py --port $PORT
 else
-  python main.py
+  python main.py --port $PORT
 fi
