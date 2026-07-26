@@ -1,6 +1,7 @@
-# ⬡ Antares — Mine Bot Manager v2.0
+# ⬡ Antares — Mine Bot Manager v2.0 (Python + Node)
 
 A premium Minecraft bot management dashboard with CLI support. Proxy auto-detection, multi-bot orchestration, live web UI.
+Now with **Python wrapper** for Pterodactyl Python egg compatibility.
 
 ## Features
 
@@ -8,6 +9,7 @@ A premium Minecraft bot management dashboard with CLI support. Proxy auto-detect
 - **Proxy Auto-Detect** — HTTP / HTTPS / SOCKS4 / SOCKS5 with automatic type detection, health tracking, and geo enrichment
 - **Live Web Dashboard** — Real-time status, logs, inventory, commands, and system metrics
 - **CLI Interface** — Full command-line control alongside the web UI
+- **Python Wrapper** — Entry point chính là `main.py`, tự động spawn Node engine (tương thích Pterodactyl Python egg)
 - **Auto Menu** — Automatic server menu navigation and GUI handling
 - **AFK Modes** — Jump and walk AFK with anti-stuck detection
 - **Shard Tracking** — Auto-read shard counts from scoreboard and inventory windows
@@ -15,6 +17,23 @@ A premium Minecraft bot management dashboard with CLI support. Proxy auto-detect
 - **Responsive Design** — Mobile-first Glassmorphism UI with gradient background
 
 ## Quick Start
+
+### Python (Recommended — Pterodactyl Python Egg)
+
+```bash
+pip install -r requirements.txt
+npm install
+python main.py
+```
+
+### Node (Legacy)
+
+```bash
+npm install
+node main.js
+# or
+npm run start:node
+```
 
 ### Windows
 ```bat
@@ -29,23 +48,55 @@ chmod +x setup.sh run.sh
 ./run.sh
 ```
 
-### Manual
-```bash
-npm install
-node main.js
-```
-
 Open **http://localhost:3000** in your browser.
 
-### Pterodactyl
+### Pterodactyl — Python Egg (Mới)
 
-- Use a **Node.js 22** server image (the current Mineflayer release requires Node.js 22+).
-- Set `MAIN_FILE` to `main.js`.
-- The startup command must execute JavaScript with Node directly:
+1. Tạo server với **Python 3.11** egg
+2. Set `MAIN_FILE` = `main.py`
+3. Startup command:
+   ```bash
+   python main.py
+   ```
+   Hoặc nếu image có cả Node + Python:
+   ```bash
+   pip install -r requirements.txt && npm install && python main.py
+   ```
+4. **Dockerfile** mới đã hỗ trợ cả Python + Node 22, chỉ cần push lên GitHub và dùng Docker image.
+
+### Pterodactyl — Node.js 22 (Cũ, vẫn hỗ trợ)
+
+- Use a **Node.js 22** server image
+- Set `MAIN_FILE` to `main.js`
+- Startup:
   ```bash
   /usr/local/bin/node /home/container/main.js
   ```
-  Do not use `ts-node --esm` for this project.
+
+## Architecture — Python Wrapper
+
+```
+main.py (Python)
+  ├─ Checks Node.js >=22
+  ├─ npm install if needed
+  ├─ Spawns: node main.js (BotManager + WebDashboard)
+  ├─ Forwards stdin (CLI commands) -> Node
+  └─ Handles SIGTERM/SIGINT + auto-restart
+
+src/python/
+  ├─ dashboard.py — Experimental pure-Python Flask fallback
+```
+
+Khi chạy `python main.py`:
+- Banner đẹp bằng `rich`
+- Kiểm tra Node, tự cài deps
+- Launch `node main.js` trên cùng PORT
+- CLI `help`, `list`, `start <id>`, `stop <id>` sẽ được forward vào Node process
+
+Nếu muốn chạy **pure Python dashboard** không cần Node (experimental):
+```bash
+python main.py --python-only
+```
 
 ## Configuration
 
@@ -110,55 +161,58 @@ exit                    Shutdown
 
 ## Requirements
 
-- **Node.js** >= 22
+- **Python** >= 3.11 (for wrapper)
+- **Node.js** >= 22 (engine)
 - **npm** >= 9
+- Python deps: `rich`, `requests`, `python-dotenv`, `psutil`
+
+Install all:
+```bash
+pip install -r requirements.txt
+npm install
+```
 
 ## Project Structure
 
 ```
 antares/
-├── main.js                  Entry point
+├── main.py                  Entry point (Python wrapper) ⭐ NEW
+├── main.js                  Entry point (Node engine, called by main.py)
+├── requirements.txt         Python dependencies ⭐ NEW
 ├── config.json              Bot & server configuration
-├── package.json             Dependencies
-├── setup.sh / setup.bat     Install scripts
-├── run.sh / run.bat         Launch scripts
+├── package.json             Dependencies (Node + Python scripts)
+├── Dockerfile               Python 3.11 + Node 22 multi-runtime ⭐ UPDATED
+├── render.yaml              Python env for Render ⭐ UPDATED
 └── src/
-    ├── core/                Core engine
-    │   ├── BotSession.js    Bot lifecycle & events
-    │   ├── ProxyManager.js  Proxy management & detection
-    │   ├── CommandRegistry.js
-    │   ├── WindowRouter.js  Minecraft GUI handling
-    │   ├── PacketMonitor.js Packet rate tracking
-    │   ├── constants.js     Timing & config constants
-    │   └── utils.js         Utility functions
+    ├── python/              Python modules ⭐ NEW
+    │   ├── dashboard.py     Flask fallback dashboard
+    │   └── __init__.py
+    ├── core/                Core engine (Node)
+    │   ├── BotSession.js
+    │   ├── ProxyManager.js
+    │   └── ...
     ├── services/
-    │   └── BotManager.js    Bot orchestration
+    │   └── BotManager.js
     └── web/
-        ├── WebDashboard.js  Express + Socket.io server
-        └── public/          Frontend assets
+        ├── WebDashboard.js
+        └── public/
 ```
 
 ## Deploy to Render
 
-### 1. Blueprint (Auto Deploy)
+### Python + Node (Current)
 
-Push this repo to GitHub, then in Render dashboard:
+Render `render.yaml` now uses `env: python`:
+- **Build:** `pip install -r requirements.txt && npm install`
+- **Start:** `python main.py`
 
-**New → Blueprint** → select your repo → Render reads `render.yaml` automatically.
+### Blueprint (Auto Deploy)
 
-### 2. Docker
+Push to GitHub → Render → **New → Blueprint** → selects repo.
 
-**New → Web Service** → Docker → point to `Dockerfile`.
+### Docker
 
-### 3. Manual
-
-**New → Web Service** → Node:
-- **Build Command:** `npm install`
-- **Start Command:** `node main.js`
-
-Render injects `PORT` env var automatically. The app prioritizes `process.env.PORT`.
-
-> Free tier spins down after inactivity. Use Starter plan for 24/7 uptime.
+**New → Web Service** → Docker → `Dockerfile` (python:3.11-slim + Node 22)
 
 ## License
 
