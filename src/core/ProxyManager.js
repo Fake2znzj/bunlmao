@@ -2,6 +2,7 @@
 const net = require('net');
 const tls = require('tls');
 const http = require('http');
+const https = require('https');
 const { TIMING } = require('./constants');
 const { nowMs } = require('./utils');
 class ProxyManager {
@@ -622,6 +623,136 @@ class ProxyManager {
         }
       }
     }
+  }
+
+  // ===== FREE PROXY FETCHER (Proxyscrape API etc) =====
+  _fetchText(url, timeout = 15000) {
+    return new Promise((resolve, reject) => {
+      const lib = url.startsWith('https://') ? https : http;
+      const req = lib.get(url, { timeout }, res => {
+        if (res.statusCode !== 200) {
+          reject(new Error(`HTTP ${res.statusCode} from ${url}`));
+          res.resume();
+          return;
+        }
+        let data = '';
+        res.setEncoding('utf8');
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => resolve(data));
+      });
+      req.on('error', reject);
+      req.on('timeout', () => {
+        req.destroy();
+        reject(new Error(`Timeout fetching ${url}`));
+      });
+    });
+  }
+
+  async fetchFreeProxiesFromUrl(apiUrl, options = {}) {
+    const {
+      tag = 'proxyscrape',
+      limit = 100,
+      defaultType = 'socks5', // proxyscrape returns ip:port without scheme, assume socks5 then auto-detect
+      autoTest = false,
+      countryFilter = null, // e.g. 'vn'
+    } = options;
+
+    try {
+      const rawText = await this._fetchText(apiUrl);
+      if (!rawText || rawText.trim().length < 5) {
+        return { ok: false, error: 'Empty response from API', count: 0 };
+      }
+
+      // Split lines, filter valid ip:port
+      const lines = rawText.split(/[\r\n,]+/).map(s => s.trim()).filter(Boolean);
+      let added = 0;
+      let skipped = 0;
+      let duplicates = 0;
+      const addedEntries = [];
+
+      for (let i = 0; i < lines.length && added < limit; i++) {
+        const line = lines[i];
+        // Basic ip:port validation
+        if (!/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d{1,5}$/.test(line)) {
+          // Try to parse as full proxy URI, if it matches, keep it
+          const parsed = this.parse(line);
+          if (!parsed) {
+            skipped++;
+            continue;
+          }
+        }
+
+        // Build raw proxy string with assumed type if needed
+        let rawProxy = line;
+        if (!line.includes('://')) {
+          rawProxy = `${defaultType}://${line}`;
+        }
+
+        // Optional country filter via geo? For now, we add all, geo will be enriched later
+        // Try add
+        const res = this.add(rawProxy, tag);
+        if (res.ok) {
+          added++;
+          addedEntries.push(res.entry);
+          if (autoTest) {
+            const idx = this.list.findIndex(p => p.id === res.entry.id);
+            if (idx !== -1) {
+              // Test in background, don't await
+              this.test(idx).catch(() => {});
+            }
+          }
+        } else {
+          if (res.msg && res.msg.includes('đã tồn tại')) {
+            duplicates++;
+          } else {
+            skipped++;
+          }
+        }
+      }
+
+      return {
+        ok: true,
+        count: added,
+        skipped,
+        duplicates,
+        totalReceived: lines.length,
+        tag,
+        apiUrl,
+        addedIds: addedEntries.map(e => e.id),
+      };
+    } catch (e) {
+      return { ok: false, error: e.message, count: 0 };
+    }
+  }
+
+  async fetchProxyscrapeVN(options = {}) {
+    // User's specific API: VN elite/anonymous/transparent socks4,socks5
+    const defaultUrl = 'https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&proxy_format=ipport&format=text&protocol=socks4%2Csocks5&anonymity=elite%2Canonymous%2Ctransparent&country=vn';
+    const url = options.url || defaultUrl;
+    const tag = options.tag || 'vn-proxyscrape';
+    const limit = options.limit || 100;
+    const autoTest = options.autoTest !== undefined ? options.autoTest : true;
+
+    // For VN proxies, try socks5 first, then socks4
+    // We'll fetch and add as socks5, background detection will correct to socks4 if needed
+    return this.fetchFreeProxiesFromUrl(url, { tag, limit, defaultType: 'socks5', autoTest });
+  }
+
+  async fetchMultipleSources(sources = [], options = {}) {
+    // sources = [{url, tag, type, limit}, ...]
+    const results = [];
+    for (const src of sources) {
+      const res = await this.fetchFreeProxiesFromUrl(src.url, {
+        tag: src.tag || 'free',
+        limit: src.limit || options.limit || 50,
+        defaultType: src.type || 'socks5',
+        autoTest: options.autoTest || false,
+      });
+      results.push({ source: src, result: res });
+      // Small delay to avoid rate limit
+      await new Promise(r => setTimeout(r, 500));
+    }
+    return results;
   }
 }
 module.exports = ProxyManager;

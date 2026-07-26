@@ -213,6 +213,96 @@ class WebDashboard {
       if (!p) return res.status(404).json({ error: 'Invalid index' });
       res.json({ ok: true, removed: { host: p.host, port: p.port } });
     });
+
+    // ===== FREE PROXY FETCHER (Proxyscrape API etc) =====
+    this.expressApp.get('/api/proxies/free-sources', (req, res) => {
+      res.json({
+        ok: true,
+        sources: [
+          {
+            id: 'vn-proxyscrape',
+            name: 'VN Elite - Proxyscrape (SOCKS4/SOCKS5)',
+            url: 'https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&proxy_format=ipport&format=text&protocol=socks4%2Csocks5&anonymity=elite%2Canonymous%2Ctransparent&country=vn',
+            tag: 'vn-proxyscrape',
+            type: 'socks5',
+            description: 'Proxy VN socks4/socks5 elite/anonymous/transparent - User request',
+            country: 'VN'
+          },
+          {
+            id: 'all-proxyscrape-socks',
+            name: 'All - Proxyscrape SOCKS4/5',
+            url: 'https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&proxy_format=ipport&format=text&protocol=socks4%2Csocks5&anonymity=elite%2Canonymous',
+            tag: 'proxyscrape-socks',
+            type: 'socks5'
+          },
+          {
+            id: 'all-proxyscrape-http',
+            name: 'All - Proxyscrape HTTP',
+            url: 'https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&proxy_format=ipport&format=text&protocol=http',
+            tag: 'proxyscrape-http',
+            type: 'http'
+          }
+        ]
+      });
+    });
+
+    this.expressApp.post('/api/proxies/fetch/free', async (req, res) => {
+      const { url, tag, limit, type, autoTest } = req.body || {};
+      if (!url) return res.status(400).json({ ok: false, error: 'url required - API endpoint for proxy list' });
+      try {
+        const result = await this.manager.proxyManager.fetchFreeProxiesFromUrl(url, {
+          tag: tag || 'free',
+          limit: Math.min(parseInt(limit, 10) || 100, 500),
+          defaultType: type || 'socks5',
+          autoTest: autoTest === true,
+        });
+        res.json(result);
+      } catch (e) {
+        res.status(500).json({ ok: false, error: e.message });
+      }
+    });
+
+    this.expressApp.get('/api/proxies/fetch-vn', async (req, res) => {
+      const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
+      const autoTest = req.query.autoTest !== 'false';
+      try {
+        const result = await this.manager.proxyManager.fetchProxyscrapeVN({ limit, autoTest });
+        res.json(result);
+      } catch (e) {
+        res.status(500).json({ ok: false, error: e.message });
+      }
+    });
+
+    this.expressApp.post('/api/proxies/fetch-vn', async (req, res) => {
+      const { limit, autoTest, url } = req.body || {};
+      try {
+        const result = await this.manager.proxyManager.fetchProxyscrapeVN({
+          limit: Math.min(parseInt(limit, 10) || 100, 500),
+          autoTest: autoTest !== false,
+          url,
+        });
+        res.json(result);
+      } catch (e) {
+        res.status(500).json({ ok: false, error: e.message });
+      }
+    });
+
+    this.expressApp.post('/api/proxies/fetch-multiple', async (req, res) => {
+      const { sources, limit, autoTest } = req.body || {};
+      const defaultSources = (sources && sources.length) ? sources : [
+        { url: 'https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&proxy_format=ipport&format=text&protocol=socks4%2Csocks5&anonymity=elite%2Canonymous%2Ctransparent&country=vn', tag: 'vn-proxyscrape', type: 'socks5', limit: 50 },
+        { url: 'https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&proxy_format=ipport&format=text&protocol=socks4%2Csocks5&anonymity=elite', tag: 'proxyscrape-mixed', type: 'socks5', limit: 50 },
+      ];
+      try {
+        const results = await this.manager.proxyManager.fetchMultipleSources(defaultSources, { limit, autoTest });
+        const totalAdded = results.reduce((sum, r) => sum + (r.result.count || 0), 0);
+        res.json({ ok: true, totalAdded, results });
+      } catch (e) {
+        res.status(500).json({ ok: false, error: e.message });
+      }
+    });
+
+
     this.expressApp.post('/api/bots/:id/assign-proxy', (req, res) => {
       const b = this.manager.findBot(req.params.id);
       if (!b) return res.status(404).json({ error: 'Not found' });

@@ -216,6 +216,69 @@ def run_dashboard(port=3000, config=None, node_missing=False):
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)}), 500
 
+    @app.route("/api/proxies/free-sources")
+    def api_free_sources():
+        return jsonify({
+            "ok": True,
+            "sources": [
+                {
+                    "id": "vn-proxyscrape",
+                    "name": "VN Elite - Proxyscrape (SOCKS4/SOCKS5)",
+                    "url": "https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&proxy_format=ipport&format=text&protocol=socks4%2Csocks5&anonymity=elite%2Canonymous%2Ctransparent&country=vn",
+                    "tag": "vn-proxyscrape",
+                    "type": "socks5",
+                    "country": "VN"
+                },
+                {
+                    "id": "all-proxyscrape-socks",
+                    "name": "All - Proxyscrape SOCKS4/5",
+                    "url": "https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&proxy_format=ipport&format=text&protocol=socks4%2Csocks5&anonymity=elite%2Canonymous",
+                    "tag": "proxyscrape-socks",
+                    "type": "socks5"
+                }
+            ]
+        })
+
+    @app.route("/api/proxies/fetch-vn")
+    def api_fetch_vn():
+        import requests
+        try:
+            url = "https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&proxy_format=ipport&format=text&protocol=socks4%2Csocks5&anonymity=elite%2Canonymous%2Ctransparent&country=vn"
+            limit = int(request.args.get("limit", 100))
+            resp = requests.get(url, timeout=15)
+            text = resp.text
+            lines = [l.strip() for l in text.splitlines() if l.strip()]
+            # Add to config? For fallback we just return list
+            # Also try to save to proxies.json? We'll store in config
+            proxies = []
+            for line in lines[:limit]:
+                if ":" in line:
+                    host, port = line.split(":", 1)
+                    proxies.append({"host": host, "port": int(port), "type": "socks5", "tag": "vn-proxyscrape"})
+
+            # Save to config.json proxies array (append)
+            try:
+                config_path = ROOT / "config.json"
+                if config_path.exists():
+                    import json
+                    with open(config_path, "r", encoding="utf-8") as cf:
+                        cfg = json.load(cf)
+                    existing = set((p.get("host"), p.get("port")) for p in cfg.get("proxies", []))
+                    added = 0
+                    for p in proxies:
+                        if (p["host"], p["port"]) not in existing:
+                            cfg.setdefault("proxies", []).append(p)
+                            added += 1
+                    with open(config_path, "w", encoding="utf-8") as cf:
+                        json.dump(cfg, cf, indent=2, ensure_ascii=False)
+                    return jsonify({"ok": True, "count": added, "totalReceived": len(lines), "proxies": proxies[:10], "message": f"Đã thêm {added} proxy VN vào config.json"})
+            except Exception as e:
+                return jsonify({"ok": True, "count": len(proxies), "totalReceived": len(lines), "proxies": proxies, "warning": f"Fetch ok nhưng lưu config lỗi: {e}"})
+
+            return jsonify({"ok": True, "count": len(proxies), "totalReceived": len(lines), "proxies": proxies})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+
     @app.route("/api/status")
     def api_status():
         node_modules = ROOT / "node_modules"
