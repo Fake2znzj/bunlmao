@@ -37,6 +37,16 @@ node main.js
 
 Open **http://localhost:3000** in your browser.
 
+### Pterodactyl
+
+- Use a **Node.js 22** server image (the current Mineflayer release requires Node.js 22+).
+- Set `MAIN_FILE` to `main.js`.
+- The startup command must execute JavaScript with Node directly:
+  ```bash
+  /usr/local/bin/node /home/container/main.js
+  ```
+  Do not use `ts-node --esm` for this project.
+
 ## Configuration
 
 Edit `config.json`:
@@ -100,7 +110,7 @@ exit                    Shutdown
 
 ## Requirements
 
-- **Node.js** >= 18
+- **Node.js** >= 22
 - **npm** >= 9
 
 ## Project Structure
