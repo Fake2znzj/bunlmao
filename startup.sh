@@ -101,16 +101,18 @@ else
 fi
 
 echo "🚀 Starting Antares..."
-# Port priority: cli arg > PORT > SERVER_PORT > 26009 > 3000
-# SERVER_PORT is Pterodactyl allocation (e.g. 26009) - use it if PORT not set
+# Port priority: cli arg > PORT > SERVER_PORT > 26270 > 3000
+# SERVER_PORT is Pterodactyl allocation (e.g. 26270) - use it if PORT not set
 if [ -z "$PORT" ] && [ -n "$SERVER_PORT" ]; then
+  # If Pterodactyl gives us a port, respect it, but user wants 26270 default
+  # Only override if user didn't explicitly want 26270? We keep SERVER_PORT if it exists
   export PORT=$SERVER_PORT
   echo "ℹ️ Using Pterodactyl SERVER_PORT as PORT: $PORT"
 fi
-export PORT=${PORT:-26009}
+export PORT=${PORT:-26270}
 export SERVER_PORT=${SERVER_PORT:-$PORT}
 echo "📡 Dashboard will run on port: $PORT (config webPort will be updated)"
-echo "   If you want different port: PORT=3000 bash startup.sh or python main.py --port 26009"
+echo "   If you want different port: PORT=3000 bash startup.sh or python main.py --port 26270"
 
 # Try python3 first, then python
 if command -v python3 >/dev/null 2>&1; then

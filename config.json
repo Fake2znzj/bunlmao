@@ -17,7 +17,7 @@
     "kingSmpSlot": 24,
     "afkGuiKeyword": "KHU AFK",
     "afkGuiSlots": 15,
-    "webPort": 26009
+    "webPort": 26270
   },
   "reconnect": {
     "baseDelay": 1000,
