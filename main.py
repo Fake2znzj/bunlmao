@@ -72,44 +72,85 @@ def load_config():
         rprint(f"[yellow]⚠ Không đọc được config.json: {e}[/yellow]" if HAS_RICH else f"Warn: {e}")
     return {}
 
+def safe_path_check(p):
+    """Check if path exists and is file, handling PermissionError gracefully"""
+    try:
+        # Use os.stat with try/except to avoid PermissionError crash on /root/*
+        # Also handle broken symlinks
+        path_obj = Path(p)
+        # First quick lexists-ish via os.path.lexists to avoid stat on forbidden dir?
+        # os.path.exists also calls stat, can raise PermissionError in some Python versions
+        # So wrap in broad try
+        if not os.path.lexists(p):
+            return False
+        # Now try to check if it's file
+        try:
+            st = path_obj.stat()
+        except (PermissionError, OSError, FileNotFoundError):
+            return False
+        # Must be file
+        if not path_obj.is_file():
+            # is_file can also raise PermissionError, double check
+            return False
+        # Check size > 1KB to filter empty files
+        try:
+            if st.st_size < 1000:
+                # still allow if it's symlink to real node? check later via version
+                pass
+        except:
+            pass
+        return True
+    except (PermissionError, OSError, ValueError, RuntimeError):
+        return False
+
 def find_node_bin():
-    """Find node binary in many possible locations"""
+    """Find node binary in many possible locations - permission safe"""
     candidates = []
     # which
-    w = shutil.which("node")
-    if w:
-        candidates.append(w)
-    w = shutil.which("nodejs")
-    if w:
-        candidates.append(w)
+    try:
+        w = shutil.which("node")
+        if w:
+            candidates.append(w)
+    except:
+        pass
+    try:
+        w = shutil.which("nodejs")
+        if w:
+            candidates.append(w)
+    except:
+        pass
 
-    # common paths
+    # common paths - ONLY user-writable or safe paths, SKIP /root entirely
     common = [
         "/usr/local/bin/node",
         "/usr/bin/node",
         "/bin/node",
         "/home/container/nodejs/bin/node",
         "/home/container/.local/nodejs/bin/node",
-        "/root/.nvm/versions/node/v22.11.0/bin/node",
+        "/home/container/.local/bin/node",
         "/opt/nodejs/bin/node",
         str(ROOT_DIR / "nodejs" / "bin" / "node"),
         str(ROOT_DIR / "node-v22.11.0-linux-x64" / "bin" / "node"),
         str(ROOT_DIR / "node-v22.11.0-linux-arm64" / "bin" / "node"),
         str(ROOT_DIR / "local_node" / "bin" / "node"),
         str(ROOT_DIR / ".local" / "bin" / "node"),
+        str(ROOT_DIR / "node-v22.9.0-linux-x64" / "bin" / "node"),
+        str(ROOT_DIR / "node-v20.18.0-linux-x64" / "bin" / "node"),
     ]
     candidates.extend(common)
 
-    # glob for any node-v*-linux-*/bin/node
+    # glob for any node-v*-linux-*/bin/node - only inside ROOT_DIR and /home/container
     for pattern in [
         str(ROOT_DIR / "node-v*-linux-*" / "bin" / "node"),
         str(ROOT_DIR / "node-*" / "bin" / "node"),
-        "./nodejs/bin/node",
+        str(ROOT_DIR / "nodejs" / "bin" / "node"),
         "/home/container/node-v*/bin/node",
+        "/home/container/nodejs/bin/node",
     ]:
         try:
-            candidates.extend(glob.glob(pattern))
-        except:
+            for match in glob.glob(pattern):
+                candidates.append(match)
+        except (PermissionError, OSError):
             pass
 
     # dedup preserve order
@@ -121,22 +162,26 @@ def find_node_bin():
             uniq.append(c)
 
     for c in uniq:
+        # safe check first
+        if not safe_path_check(c):
+            continue
         p = Path(c)
-        if p.exists() and p.is_file():
+        try:
+            os.chmod(c, 0o755)
+        except (PermissionError, OSError):
+            pass
+        # quick check version
+        try:
+            res = subprocess.run([c, "--version"], capture_output=True, text=True, timeout=3)
+            if res.returncode == 0 and res.stdout.strip().startswith("v"):
+                return c
+        except (PermissionError, OSError, FileNotFoundError, subprocess.SubprocessError):
+            # try size check as fallback
             try:
-                # test executable and version
-                os.chmod(c, 0o755)
-            except:
-                pass
-            # quick check if it's actually node by running --version (allow fail)
-            try:
-                res = subprocess.run([c, "--version"], capture_output=True, text=True, timeout=3)
-                if res.returncode == 0 and "v" in res.stdout:
+                if p.stat().st_size > 1000000:
                     return c
-            except:
-                # still return if file exists, maybe permission issue
-                if p.stat().st_size > 1000000:  # node binary >1MB
-                    return c
+            except (PermissionError, OSError):
+                continue
     return None
 
 def download_node_binary():
