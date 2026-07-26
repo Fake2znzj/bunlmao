@@ -799,6 +799,17 @@ body{
 
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 
+.empty-state{
+  min-height:clamp(260px,45vh,420px);display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:8px;text-align:center;border:1px dashed var(--border-light);border-radius:var(--r-lg);
+  background:radial-gradient(circle at 50% 25%,var(--accent-dim),transparent 48%),var(--bg-card);
+  padding:32px 20px;
+}
+.empty-state-icon{font-size:42px;line-height:1;color:var(--accent);opacity:.85;text-shadow:0 0 24px rgba(94,234,212,.3)}
+.empty-state-title{font-size:16px;font-weight:700;color:var(--text)}
+.empty-state-sub{font-size:11px;color:var(--text-2);margin-bottom:8px}
+.empty-state .btn{min-width:140px;justify-content:center}
+
 *:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:2px}
 button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 

@@ -3,7 +3,9 @@ const ST = {
   bots: [],
   activeId: null,
   activeTab: 'overview',
+  activeView: 'home',
   serverEnv: {},
+  _collapsedGroups: new Set(),
   proxies: [],
   _sysMetrics: {},
   _proxyViewMode: 'list',
@@ -45,6 +47,7 @@ function updateMobileNav(tab) {
   });
 }
 function showGlobalDashboard() {
+  ST.activeView = 'home';
   ST.activeId = null;
   DOM.noSel.style.display = 'none';
   DOM.botView.style.display = '';
@@ -55,6 +58,7 @@ function showGlobalDashboard() {
   updateMobileNav('home');
 }
 function openBotsSidebar() {
+  ST.activeView = 'bots';
   ST.activeId = null;
   DOM.noSel.style.display = '';
   DOM.botView.style.display = 'none';
@@ -68,6 +72,7 @@ function openBotsSidebar() {
   updateMobileNav('bots');
 }
 function showManagerTab() {
+  ST.activeView = 'manager';
   ST.activeId = null;
   DOM.noSel.style.display = 'none';
   DOM.botView.style.display = '';
@@ -79,6 +84,7 @@ function showManagerTab() {
   updateMobileNav('manager');
 }
 function showSystemTab() {
+  ST.activeView = 'system';
   ST.activeId = null;
   DOM.noSel.style.display = 'none';
   DOM.botView.style.display = '';
@@ -177,9 +183,15 @@ SOCK.on('reconnect_attempt', n => {
 SOCK.on('connect_error', err => {
   console.warn('[Socket] Connect error:', err.message);
 });
+function toggleSidebarGroup(group) {
+  if (ST._collapsedGroups.has(group)) ST._collapsedGroups.delete(group);
+  else ST._collapsedGroups.add(group);
+  renderSB();
+}
 function renderSB() {
   const list = DOM.sbList;
   if (!list) return;
+  const scrollTop = list.scrollTop;
   list.innerHTML = '';
   const groups = { ONLINE: [], IDLE: [], OFFLINE: [] };
   for (const b of ST.bots) {
@@ -199,8 +211,9 @@ function renderSB() {
       : items;
     if (!filtered.length) continue;
     const groupDiv = document.createElement('div');
-    groupDiv.className = 'sb-group';
-    groupDiv.innerHTML = `<div class="sb-group-hdr" onclick="this.parentElement.classList.toggle('collapsed')"><span class="sb-group-dot ${g.toLowerCase()}"></span><span class="sb-group-label">${groupLabels[g]}</span><span class="sb-group-cnt">${filtered.length}</span><span class="sb-group-arrow">▾</span></div>`;
+    groupDiv.className = 'sb-group' + (ST._collapsedGroups.has(g) ? ' collapsed' : '');
+    groupDiv.dataset.group = g;
+    groupDiv.innerHTML = `<div class="sb-group-hdr" onclick="toggleSidebarGroup('${g}')"><span class="sb-group-dot ${g.toLowerCase()}"></span><span class="sb-group-label">${groupLabels[g]}</span><span class="sb-group-cnt">${filtered.length}</span><span class="sb-group-arrow">▾</span></div>`;
     const itemsDiv = document.createElement('div');
     itemsDiv.className = 'sb-group-items';
     for (const b of filtered) {
@@ -229,10 +242,12 @@ function renderSB() {
   }
   const total = ST.bots.length;
   const online = ST.bots.filter(b=>b.state==='ONLINE').length;
-  DOM.hdrCount.textContent = total + ' Bot' + (total !== 1 ? 's' : '') + ' Online';
+  DOM.hdrCount.textContent = online + '/' + total + ' Bot' + (total !== 1 ? 's' : '') + ' Online';
   DOM.hdrLive.style.display = total > 0 ? '' : 'none';
   renderBulkBar();
   renderSidebarStats();
+  // Do not make the list jump to the top every live status update.
+  list.scrollTop = scrollTop;
 }
 function renderSidebarStats() {
   const m = ST._sysMetrics || {};
@@ -298,9 +313,14 @@ function bulkStop() {
   ST._selectedBots.clear(); renderSB();
 }
 function bulkRestart() {
-  if (!confirm('Restart ' + ST._selectedBots.size + ' bot?')) return;
-  SOCK.emit('restartAll', { filterFn: null }, r => { toast('Đã gửi restart ' + ST._selectedBots.size + ' bot', 'warn'); });
-  ST._selectedBots.clear(); renderSB();
+  const ids = [...ST._selectedBots];
+  if (!ids.length || !confirm('Restart ' + ids.length + ' bot?')) return;
+  // Functions cannot be serialized through Socket.IO. Send only the selected
+  // IDs so a bulk restart never accidentally restarts every bot.
+  ids.forEach(id => SOCK.emit('reconnect_bot', { id }));
+  ST._selectedBots.clear();
+  renderSB();
+  toast('Đã gửi restart ' + ids.length + ' bot', 'warn');
 }
 function bulkDelete() {
   if (!confirm('XÓA ' + ST._selectedBots.size + ' bot? Không thể hoàn tác!')) return;
@@ -310,6 +330,7 @@ function bulkDelete() {
 function selectBot(id) {
   if (!ST.bots.find(b=>b.id===id)) return;
   if (ST.activeId && ST.activeId !== id) SOCK.emit('unsubscribe', ST.activeId);
+  ST.activeView = 'bot';
   ST.activeId = id;
   DOM.noSel.style.display = 'none';
   DOM.botView.style.display = '';
@@ -324,11 +345,21 @@ function selectBot(id) {
 }
 function renderGlobalDashboard() {
   const bots = ST.bots;
+  const scrollTop = DOM.tabContent?.scrollTop || 0;
   DOM.noSel.style.display = 'none';
   DOM.botView.style.display = '';
   DOM.tabs.style.display = 'none';
   DOM.actionBar.innerHTML = '';
   let html = `<div class="sec-label">Global Dashboard (${bots.length} bots)</div>`;
+  if (!bots.length) {
+    DOM.tabContent.innerHTML = `${html}<div class="empty-state">
+      <div class="empty-state-icon">⬡</div>
+      <div class="empty-state-title">Chưa có bot nào</div>
+      <div class="empty-state-sub">Thêm bot đầu tiên để bắt đầu quản lý server.</div>
+      <button class="btn btn-primary" onclick="openModal('overlay-add-bot')">＋ Thêm bot</button>
+    </div>`;
+    return;
+  }
   html += '<div class="gd-grid">';
   for (const b of bots) {
     const cls = stateClass(b.state);
@@ -357,6 +388,7 @@ function renderGlobalDashboard() {
   html += '</div>';
   DOM.tabContent.innerHTML = html;
   requestAnimationFrame(() => {
+    DOM.tabContent.scrollTop = scrollTop;
     for (const b of bots) {
       if (b._pktHistory && b._pktHistory.length > 1) {
         drawMiniSpark(b.id, b._pktHistory);
@@ -389,8 +421,13 @@ function drawMiniSpark(botId, data) {
   ctx.stroke();
 }
 function renderActiveTab() {
-  if (ST.activeId) renderBotTabs();
-  else renderGlobalDashboard();
+  if (ST.activeId) {
+    renderBotTabs();
+    return;
+  }
+  if (ST.activeView === 'manager') renderManager();
+  else if (ST.activeView === 'system') renderSystem();
+  else if (ST.activeView === 'home') renderGlobalDashboard();
 }
 function renderBotTabs() {
   const tabs = DOM.tabs.querySelectorAll('.tab');
@@ -503,8 +540,27 @@ function renderActionBar() {
     <button class="btn btn-primary btn-sm" onclick="openEditModal('${esc(b.id)}')" aria-label="Sửa bot">✏ Edit</button>
     <button class="btn btn-warn btn-sm" onclick="removeBot('${b.id}')" aria-label="Xóa bot">✕ Remove</button>`;
 }
+function getClientSummary() {
+  const counts = { ONLINE: 0, CONNECTING: 0, AUTHENTICATING: 0, SPAWNING: 0, RECONNECTING: 0, DISCONNECTED: 0, STOPPING: 0 };
+  let totalPpsIn = 0, totalPpsOut = 0, totalPing = 0, pingCount = 0;
+  for (const b of ST.bots) {
+    const state = b.state || 'DISCONNECTED';
+    counts[state] = (counts[state] || 0) + 1;
+    totalPpsIn += b.ppsIn || 0;
+    totalPpsOut += b.ppsOut || 0;
+    if (b.ping >= 0) { totalPing += b.ping; pingCount++; }
+  }
+  return {
+    total: ST.bots.length,
+    counts,
+    totalPpsIn,
+    totalPpsOut,
+    avgPing: pingCount ? Math.round(totalPing / pingCount) : -1,
+  };
+}
 function renderManager() {
-  const summary = ST._summary;
+  const scrollTop = DOM.tabContent?.scrollTop || 0;
+  const summary = getClientSummary();
   let html = '';
   if (summary) {
     html += `<div class="summary-bar"><span class="summary-total">Tổng: ${summary.total}</span>
@@ -540,6 +596,7 @@ function renderManager() {
       <button class="btn btn-primary" onclick="openModal('overlay-add-bot')" aria-label="Thêm bot mới">＋ Add Bot</button>
     </div>`;
   DOM.tabContent.innerHTML = html;
+  requestAnimationFrame(() => { if (DOM.tabContent) DOM.tabContent.scrollTop = scrollTop; });
 }
 function renderLogs(b) {
   ST._logFilter = 'all'; ST._logPaused = false; ST._logSearch = '';
@@ -1020,6 +1077,7 @@ function renderStats(b) {
   });
 }
 function renderSystem() {
+  const scrollTop = DOM.tabContent?.scrollTop || 0;
   const m = ST._sysMetrics||{};
   const memPercent = m.memPercent||0;
   const barCls = memPercent>80?'danger':memPercent>60?'warn':'';
@@ -1040,6 +1098,7 @@ function renderSystem() {
       <div class="sys-grid">${env?Object.entries(env).map(([k,v])=>`<div class="sys-card"><div class="sys-card-label">${k}</div><div class="sys-card-value" style="font-size:13px">${typeof v==='boolean'?(v?'✅':'❌'):esc(String(v))}</div></div>`).join(''):'<div style="color:var(--text-3)">—</div>'}
       </div>
     </div>`;
+  requestAnimationFrame(() => { if (DOM.tabContent) DOM.tabContent.scrollTop = scrollTop; });
 }
 function toggleTshard(id) {
   const b = ST.bots.find(x=>x.id===id);
@@ -1053,8 +1112,21 @@ function startBot(id) { SOCK.emit('startBot',{id},r=>{if(r&&!r.ok) toast(r.messa
 function stopBot(id) { if(!confirm('Stop bot '+id+'?'))return; SOCK.emit('stopBot',{id}); }
 function reconnectBot(id) { SOCK.emit('reconnect_bot',{id}); toast('Reconnecting...','warn'); }
 function removeBot(id) { if(!confirm('Remove bot '+id+'?'))return; SOCK.emit('removeBot',{id}); }
-function startAll() { fetch('/api/bots/all/start',{method:'POST'}).then(()=>toast('Starting all...')); }
-function stopAll() { if(!confirm('Stop ALL bots?'))return; fetch('/api/bots/all/stop',{method:'POST'}).then(()=>toast('Stopping all...')); }
+async function startAll() {
+  try {
+    const r = await fetch('/api/bots/all/start', { method: 'POST' });
+    if (!r.ok) throw new Error('Không thể khởi động tất cả bot');
+    toast('Đang khởi động tất cả bot...', 'success');
+  } catch (e) { toast(e.message || 'Lỗi mạng', 'error'); }
+}
+async function stopAll() {
+  if (!confirm('Dừng TẤT CẢ bot?')) return;
+  try {
+    const r = await fetch('/api/bots/all/stop', { method: 'POST' });
+    if (!r.ok) throw new Error('Không thể dừng tất cả bot');
+    toast('Đã gửi lệnh dừng tất cả bot', 'warn');
+  } catch (e) { toast(e.message || 'Lỗi mạng', 'error'); }
+}
 function toggleEditProxySelect() {
   const g = $('edit-bot-proxy-group');
   if(g) g.style.display = $('edit-bot-proxy')?.checked?'':'none';
@@ -1083,7 +1155,7 @@ function saveBot() {
   const id = $('edit-bot-title-id')?.textContent; if(!id)return;
   const data = { id, host:($('edit-bot-host')?.value||'').trim()||undefined, port:parseInt($('edit-bot-port')?.value,10)||undefined, username:($('edit-bot-user')?.value||'').trim()||undefined, version:($('edit-bot-ver')?.value||'').trim()||undefined, password:($('edit-bot-pass')?.value||'').trim()||undefined, ownerUsername:($('edit-bot-owner')?.value||'').trim()||undefined, menuCommand:($('edit-bot-menu')?.value||'').trim()||undefined, autoMenu:$('edit-bot-automenu')?.checked, useProxy:$('edit-bot-proxy')?.checked, proxyId: $('edit-bot-proxy')?.checked ? ($('edit-bot-proxy-select')?.value || undefined) : undefined };
   for(const k of Object.keys(data)){ if(data[k]===undefined || data[k]===null)delete data[k]; }
-  SOCK.emit('editBot',data,r=>{ if(r&&r.ok){ closeModal('overlay-edit-bot'); toast('Bot updated: '+id+' ✔ Đã lưu','success'); } else { const errEl=$('edit-bot-err'); if(errEl){errEl.style.display='';errEl.textContent=(r&&r.msg)?r.msg:'Failed'} } });
+  SOCK.emit('editBot',data,r=>{ if(r&&r.ok){ closeModal('overlay-edit-bot'); toast('Bot updated: '+id+' ✔ Đã lưu','success'); } else { const errEl=$('edit-bot-err'); if(errEl){errEl.style.display='';errEl.textContent=(r&&(r.message||r.msg))?(r.message||r.msg):'Lưu thất bại'} } });
 }
 let _pendingAddBot = null;
 function addBot() {
@@ -1123,7 +1195,7 @@ function addBot() {
 }
 function _doAddBot(payload) {
   _pendingAddBot = null;
-  SOCK.emit('addBot',payload,r=>{ if(r&&r.ok){ closeModal('overlay-add-bot'); closeModal('overlay-capacity-warn'); toast('Bot created: '+payload.id+' ✔ Đã lưu','success');  ['new-bot-id','new-bot-host','new-bot-user','new-bot-pass','new-bot-ver','new-bot-proxy','new-bot-port'].forEach(n=>{const el=$(n);if(el)el.value=n==='new-bot-port'?'25565':''}); } else { const errEl=$('add-bot-err'); if(errEl){errEl.style.display='';errEl.textContent=(r&&r.msg)?r.msg:'Failed'} } });
+  SOCK.emit('addBot',payload,r=>{ if(r&&r.ok){ closeModal('overlay-add-bot'); closeModal('overlay-capacity-warn'); toast('Bot created: '+payload.id+' ✔ Đã lưu','success');  ['new-bot-id','new-bot-host','new-bot-user','new-bot-pass','new-bot-ver','new-bot-proxy','new-bot-port'].forEach(n=>{const el=$(n);if(el)el.value=n==='new-bot-port'?'25565':''}); } else { const errEl=$('add-bot-err'); if(errEl){errEl.style.display='';errEl.textContent=(r&&(r.message||r.msg))?(r.message||r.msg):'Tạo bot thất bại'} } });
 }
 function addProxy() {
   const raw=($('new-proxy-raw')?.value||'').trim(),tag=($('new-proxy-tag')?.value||'').trim(); if(!raw)return;
@@ -1188,9 +1260,15 @@ SOCK.on('init', data => {
   renderSB();
   renderCapacityBar();
   renderSidebarStats();
-  if(ST.activeId){ renderActionBar(); }
-  if (!ST.activeId) { renderGlobalDashboard(); }
-  else { DOM.noSel.style.display = 'none'; DOM.botView.style.display = ''; DOM.tabs.style.display = ''; renderActionBar(); renderActiveTab(); }
+  if (ST.activeId) {
+    DOM.noSel.style.display = 'none';
+    DOM.botView.style.display = '';
+    DOM.tabs.style.display = '';
+    renderActionBar();
+    renderActiveTab();
+  } else {
+    renderActiveTab();
+  }
 });
 SOCK.on('statusUpdate', data => {
   const bots = data.bots || [];
@@ -1208,19 +1286,32 @@ SOCK.on('statusUpdate', data => {
       const totalPps = (b.ppsIn||0) + (b.ppsOut||0);
       pkh.push(totalPps); if (pkh.length > 30) pkh.shift();
       if (keyChanged && ST.activeId === b.id) {
+        const scrollTop = DOM.tabContent?.scrollTop || 0;
         if (ST.activeTab === 'overview') renderOverview(ST.bots[idx]);
         if (ST.activeTab === 'stats') renderStats(ST.bots[idx]);
+        if (ST.activeTab === 'manager') renderManager();
         renderActionBar();
+        requestAnimationFrame(() => { if (DOM.tabContent) DOM.tabContent.scrollTop = scrollTop; });
       }
     } else {
+      b._pingHistory = b.ping >= 0 ? [b.ping] : [];
+      b._pktHistory = [(b.ppsIn || 0) + (b.ppsOut || 0)];
       ST.bots.push(b);
     }
   }
   const ids = new Set(bots.map(b=>b.id));
   ST.bots = ST.bots.filter(b=>ids.has(b.id));
   renderSB();
-  if (!ST.activeId) { renderGlobalDashboard(); }
-  else if (ST.activeId && !ST.bots.find(b=>b.id===ST.activeId)) { ST.activeId = null; renderActiveTab(); }
+  // Keep the current page stable. Previously every status packet forced the
+  // Manager/System pages back to the home dashboard and caused visible jumps.
+  if (!ST.activeId) {
+    if (ST.activeView === 'home') renderGlobalDashboard();
+    else if (ST.activeView === 'manager') renderManager();
+  } else if (!ST.bots.find(b=>b.id===ST.activeId)) {
+    ST.activeId = null;
+    ST.activeView = 'home';
+    showGlobalDashboard();
+  }
 });
 SOCK.on('botAdded', data => {
   if (!ST.bots.find(b=>b.id===data.id)) { ST.bots.push(data); renderSB(); }
@@ -1237,7 +1328,11 @@ SOCK.on('botUpdated', data => {
 SOCK.on('botRemoved', data => {
   ST.bots = ST.bots.filter(b=>b.id!==data.id);
   ST._selectedBots.delete(data.id);
-  if (ST.activeId===data.id) { ST.activeId=null; DOM.noSel.style.display=''; DOM.botView.style.display='none'; }
+  if (ST.activeId===data.id) {
+    ST.activeId = null;
+    ST.activeView = 'home';
+    showGlobalDashboard();
+  }
   renderSB();
   toast('Bot removed: '+data.id,'warn');  fetch('/api/capacity').then(r=>r.json()).then(d=>{ ST._capacity = d; renderCapacityBar(); renderSidebarStats(); }).catch(()=>{});
 });
@@ -1266,7 +1361,11 @@ SOCK.on('customCmds', data => {
   if (b) b._customCmds = data.cmds || [];
   if (ST.activeId===data.id&&ST.activeTab==='commands') { const b2=ST.bots.find(x=>x.id===ST.activeId); if(b2) renderCommands(b2); }
 });
-SOCK.on('systemMetrics', data => { ST._sysMetrics = data; if (ST.activeTab==='system'&&ST.activeId) renderSystem(); renderSidebarStats(); });
+SOCK.on('systemMetrics', data => {
+  ST._sysMetrics = data;
+  if (ST.activeView === 'system' || (ST.activeId && ST.activeTab === 'system')) renderSystem();
+  renderSidebarStats();
+});
 SOCK.on('proxyList', data => {
   ST.proxies = data;
   if (ST.activeTab==='proxy'){
@@ -1345,10 +1444,27 @@ document.addEventListener('DOMContentLoaded', () => {
   $('btn-create-bot')?.addEventListener('click', addBot);
   $('btn-add-proxy')?.addEventListener('click', addProxy);
   $('btn-save-bot')?.addEventListener('click', saveBot);
-  $('btn-refresh')?.addEventListener('click', ()=>{
-    fetch('/api/bots').then(r=>r.json()).then(data=>{ ST.bots=data; renderSB(); if(!ST.activeId)renderGlobalDashboard(); if(ST.activeId){ const b=ST.bots.find(x=>x.id===ST.activeId); if(b)renderActionBar(); } });
-    fetch('/api/proxies').then(r=>r.json()).then(d=>{ ST.proxies=d; });
-    toast('Refreshed','success');
+  $('btn-refresh')?.addEventListener('click', async ()=>{
+    const btn = $('btn-refresh');
+    if (btn) btn.disabled = true;
+    try {
+      const [botsRes, proxiesRes] = await Promise.all([fetch('/api/bots'), fetch('/api/proxies')]);
+      if (!botsRes.ok || !proxiesRes.ok) throw new Error('Server trả về lỗi');
+      ST.bots = await botsRes.json();
+      ST.proxies = await proxiesRes.json();
+      if (ST.activeId && !ST.bots.some(b => b.id === ST.activeId)) {
+        ST.activeId = null;
+        ST.activeView = 'home';
+      }
+      renderSB();
+      renderActiveTab();
+      if (ST.activeId) renderActionBar();
+      toast('Đã làm mới dữ liệu', 'success');
+    } catch (err) {
+      toast('Làm mới thất bại: ' + (err.message || 'lỗi mạng'), 'error');
+    } finally {
+      if (btn) btn.disabled = false;
+    }
   });
   $('btn-help')?.addEventListener('click', ()=>openModal('overlay-shortcuts'));
   $('btn-cap-proceed')?.addEventListener('click', () => {
