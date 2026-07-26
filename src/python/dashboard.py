@@ -33,33 +33,43 @@ def run_dashboard(port=3000, config=None, node_missing=False):
     def index():
         # If node missing, serve a custom warning page, but still try to serve original if exists
         if node_missing:
+            # Check if node_modules missing
+            node_modules_path = ROOT / "node_modules"
+            has_node_modules = node_modules_path.exists() and (node_modules_path / "chalk").exists()
+            is_module_not_found = not has_node_modules
+            
             # If original index.html exists, inject warning via HTML wrapper? For simplicity, serve warning + link to original
             # We will serve a hybrid page that shows warning and still loads original dashboard below
-            warning_html = f"""
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <meta charset="utf-8">
-                <meta name="viewport" content="width=device-width, initial-scale=1">
-                <title>Antares - Node.js Missing</title>
-                <style>
-                    body{{font-family: system-ui, sans-serif;background:#0f0f10;color:#e2e8f0;margin:0;padding:20px}}
-                    .alert{{background:linear-gradient(135deg,#ff4d4d,#a00);color:white;padding:20px;border-radius:12px;margin-bottom:20px;box-shadow:0 4px 20px rgba(255,0,0,0.3)}}
-                    .card{{background:#1e1e20;border:1px solid #333;border-radius:12px;padding:20px;margin-bottom:16px}}
-                    code{{background:#2a2a2e;padding:4px 8px;border-radius:6px;display:block;margin:8px 0;white-space:pre-wrap;word-break:break-all;color:#22d3ee}}
-                    a{{color:#a78bfa;text-decoration:none}} a:hover{{text-decoration:underline}}
-                    .btn{{background:#7c3aed;color:white;padding:10px 20px;border-radius:8px;display:inline-block;margin-top:10px}}
-                </style>
-            </head>
-            <body>
-                <div class="alert">
-                    <h2>⚠ Node.js Không Tìm Thấy - Server Vẫn Online (Fallback Mode)</h2>
+            if is_module_not_found:
+                title = "⚠ MODULE_NOT_FOUND - node_modules thiếu"
+                main_msg = f"""
+                    <p>Node.js <b>đã cài thành công v22.11.0</b> nhưng <b>node_modules thiếu</b> nên bot không chạy được.</p>
+                    <p>Lỗi bạn gặp: <code>MODULE_NOT_FOUND</code> trong <code>main.js</code> - thiếu thư viện <code>chalk, express, mineflayer...</code></p>
+                    <p>Server được giữ online bằng Python fallback để bạn fix.</p>
+                """
+                fix_html = f"""
+                    <p><b>Cách 1: Gõ trong Console Pterodactyl (ô Type a command):</b></p>
+                    <code>npm install</code>
+                    <p>Đợi 1-2 phút cho nó cài xong 200+ packages, sau đó gõ:</p>
+                    <code>rs</code> hoặc Restart server
+
+                    <p><b>Cách 2: Đổi Startup Command thành:</b></p>
+                    <code>npm install --production --no-fund --no-audit && bash startup.sh</code>
+
+                    <p><b>Cách 3: Xóa node_modules hỏng và cài lại:</b></p>
+                    <code>rm -rf node_modules && npm install && python main.py --port {port}</code>
+
+                    <p><b>Cách 4: Dùng bản mới nhất đã fix auto-install:</b></p>
+                    <code>https://github.com/Fake2znzj/bunlmao/archive/refs/heads/arena/019f9eb9-bunlmao.zip</code>
+                    <p>Bản mới sẽ tự kiểm tra và cài lại nếu thiếu module.</p>
+                """
+            else:
+                title = "⚠ Node.js Không Tìm Thấy - Server Vẫn Online (Fallback Mode)"
+                main_msg = f"""
                     <p>Panel <b>nvnmc.top</b> của bạn đang dùng image Python thuần, không có Node.js nên bot Minecraft không chạy được.</p>
                     <p>Server được giữ online bằng Python fallback để bạn có thời gian fix, không bị crash loop.</p>
-                </div>
-
-                <div class="card">
-                    <h3>🔧 Cách Fix Nhanh (Chọn 1):</h3>
+                """
+                fix_html = f"""
                     <p><b>Cách 1: Đổi Startup Command trong Pterodactyl panel:</b></p>
                     <code>curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && apt-get install -y nodejs && pip install -r requirements.txt --break-system-packages && npm install && python main.py</code>
 
@@ -71,22 +81,56 @@ def run_dashboard(port=3000, config=None, node_missing=False):
 
                     <p><b>Cách 4: Main.py sẽ tự tải Node (đã fix):</b></p>
                     <p>Bản mới đã có tính năng auto-download Node.js binary. Hãy kéo code mới nhất từ GitHub và restart server. Nếu vẫn lỗi, dùng Cách 1.</p>
+                """
+
+            warning_html = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="utf-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1">
+                <title>Antares - Fallback</title>
+                <style>
+                    body{{font-family: system-ui, sans-serif;background:#0f0f10;color:#e2e8f0;margin:0;padding:20px}}
+                    .alert{{background:linear-gradient(135deg,#ff4d4d,#a00);color:white;padding:20px;border-radius:12px;margin-bottom:20px;box-shadow:0 4px 20px rgba(255,0,0,0.3)}}
+                    .alert-green{{background:linear-gradient(135deg,#22c55e,#16a34a);color:white;padding:16px;border-radius:12px;margin-bottom:20px}}
+                    .card{{background:#1e1e20;border:1px solid #333;border-radius:12px;padding:20px;margin-bottom:16px}}
+                    code{{background:#2a2a2e;padding:8px 12px;border-radius:6px;display:block;margin:8px 0;white-space:pre-wrap;word-break:break-all;color:#22d3ee;font-family:monospace}}
+                    a{{color:#a78bfa;text-decoration:none}} a:hover{{text-decoration:underline}}
+                    .btn{{background:#7c3aed;color:white;padding:10px 20px;border-radius:8px;display:inline-block;margin:6px 6px 6px 0;text-decoration:none}}
+                    .btn-green{{background:#16a34a}}
+                    .tag{{display:inline-block;background:#333;padding:4px 10px;border-radius:20px;font-size:12px;margin-right:6px}}
+                </style>
+            </head>
+            <body>
+                <div class="alert-green">
+                    <h3>✅ Ngon! Ngrok đã chạy - Server Online { ' - ' + str(port) if port else '' }</h3>
+                    <p>Bạn đang vào được web qua ngrok: <b>{ os.getenv('NGROK_URL', 'ngrok-free.dev') }</b> - Server đã Online giữ được!</p>
+                </div>
+
+                <div class="alert">
+                    <h2>{title}</h2>
+                    {main_msg}
+                </div>
+
+                <div class="card">
+                    <h3>🔧 Cách Fix Nhanh (Chọn 1):</h3>
+                    {fix_html}
                 </div>
 
                 <div class="card">
                     <h3>📊 Trạng Thái Hiện Tại</h3>
-                    <p>Port: {port}</p>
-                    <p>Mode: Python Fallback (giữ online)</p>
+                    <p><span class="tag">Port: {port}</span> <span class="tag">Mode: Python Fallback</span> <span class="tag">Node: {'Có' if (ROOT / 'nodejs' / 'bin' / 'node').exists() or (ROOT / 'node-v22.11.0-linux-x64' / 'bin' / 'node').exists() else 'Thiếu?'}</span> <span class="tag">node_modules: {'✅ Có' if has_node_modules else '❌ Thiếu MODULE_NOT_FOUND'}</span></p>
                     <p>Config bots: {len(config.get('bots', []))} bot(s)</p>
                     <p>Config path: {str(ROOT / 'config.json')}</p>
-                    <p><a class="btn" href="/api/bots">Xem API Bots</a> <a class="btn" href="/api/system">System Info</a></p>
+                    <p><a class="btn" href="/api/bots">Xem API Bots</a> <a class="btn" href="/api/system">System Info</a> <a class="btn btn-green" href="/api/install-deps">🔄 Thử cài lại node_modules (API)</a></p>
                 </div>
 
                 <div class="card">
                     <h3>📥 Tải Bản Fix Mới</h3>
-                    <p>Code mới nhất đã fix auto-download Node:</p>
+                    <p>Code mới nhất đã fix auto-install node_modules khi thiếu:</p>
                     <code>https://github.com/Fake2znzj/bunlmao/archive/refs/heads/arena/019f9eb9-bunlmao.zip</code>
-                    <p>Release: <a href="https://github.com/Fake2znzj/bunlmao/releases/tag/v2.0-python-wrapper" target="_blank">v2.0-python-wrapper</a></p>
+                    <p>Release: <a href="https://github.com/Fake2znzj/bunlmao/releases" target="_blank">Releases</a></p>
                 </div>
 
                 <div class="card" style="opacity:0.7">
@@ -150,14 +194,39 @@ def run_dashboard(port=3000, config=None, node_missing=False):
                 "fix": "curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && apt-get install -y nodejs"
             })
 
+    @app.route("/api/install-deps", methods=["GET", "POST"])
+    def api_install_deps():
+        import subprocess
+        import shutil
+        ROOT = Path(__file__).parent.parent.parent
+        node_modules = ROOT / "node_modules"
+        # Find npm
+        npm_bin = shutil.which("npm") or str(ROOT / "nodejs" / "bin" / "npm") or "npm"
+        try:
+            # Try install
+            result = subprocess.run([npm_bin, "install", "--production", "--no-fund", "--no-audit"], cwd=str(ROOT), timeout=300, capture_output=True, text=True)
+            output = result.stdout[-2000:] + "\n" + result.stderr[-2000:]
+            success = result.returncode == 0 and (ROOT / "node_modules" / "chalk").exists()
+            return jsonify({
+                "ok": success,
+                "returncode": result.returncode,
+                "output": output,
+                "message": "Đã cài xong! Hãy restart server để chạy bot (gõ rs hoặc bấm Restart)" if success else "Cài thất bại, xem output"
+            })
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+
     @app.route("/api/status")
     def api_status():
+        node_modules = ROOT / "node_modules"
+        has_modules = (node_modules / "chalk").exists() and (node_modules / "mineflayer").exists()
         return jsonify({
             "ok": True,
             "nodeMissing": node_missing,
             "mode": "fallback",
             "port": port,
-            "message": "Server đang chạy fallback mode, cần cài Node.js để chạy bot"
+            "hasNodeModules": has_modules,
+            "message": "Thiếu node_modules - cần npm install" if not has_modules else "Server đang chạy fallback mode"
         })
 
     @app.route("/<path:path>")

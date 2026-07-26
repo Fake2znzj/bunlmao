@@ -361,67 +361,138 @@ def check_node_version(version_str):
         return False
 
 def ensure_node_modules(no_install=False):
+    """Ensure node_modules has all required deps - fix MODULE_NOT_FOUND crash"""
+    required_modules = ["chalk", "express", "mineflayer", "socket.io", "boxen", "strip-ansi", "cli-table3"]
     node_modules = ROOT_DIR / "node_modules"
-    if node_modules.exists() and (node_modules / "mineflayer").exists():
-        return True
-    if no_install:
-        return False
-    rprint("[cyan]📦 node_modules thiếu — đang chạy npm install...[/cyan]")
-    node_bin = find_node_bin()
-    # Find npm
-    npm_bin = None
-    if node_bin:
-        # npm usually sibling to node
-        possible_npm = Path(node_bin).parent / "npm"
-        if possible_npm.exists():
-            npm_bin = str(possible_npm)
-    if not npm_bin:
-        npm_bin = shutil.which("npm")
-    if not npm_bin:
-        npm_bin = "/usr/local/bin/npm"
-        if not Path(npm_bin).exists():
-            npm_bin = str(ROOT_DIR / "nodejs" / "bin" / "npm")
-    if not Path(npm_bin).exists() if npm_bin else True:
-        npm_bin = "npm"  # fallback to PATH
+    
+    missing = []
+    if not node_modules.exists():
+        missing = required_modules
+    else:
+        for mod in required_modules:
+            mod_path = node_modules / mod
+            try:
+                if not mod_path.exists() or not any(mod_path.iterdir()):
+                    missing.append(mod)
+            except:
+                missing.append(mod)
 
-    try:
-        # Use node to run npm if needed: node /path/to/npm-cli.js install
-        if "npm" in npm_bin and Path(npm_bin).exists():
-            cmd = [npm_bin, "install", "--production", "--no-fund", "--no-audit"]
-        else:
-            # try npx or node
-            if node_bin:
-                cmd = [node_bin, str(Path(npm_bin).parent / "npm-cli.js" if Path(npm_bin).exists() else npm_bin), "install", "--production", "--no-fund", "--no-audit"]
-                # simpler: use npm bin as string
-                cmd = [npm_bin, "install", "--production", "--no-fund", "--no-audit"]
-            else:
-                cmd = [npm_bin, "install", "--production", "--no-fund", "--no-audit"]
-
-        rprint(f"[dim]Chạy: {' '.join(cmd)}[/dim]" if HAS_RICH else f"Running: {' '.join(cmd)}")
-        proc = subprocess.run(
-            cmd,
-            cwd=str(ROOT_DIR),
-            timeout=300
-        )
-        return proc.returncode == 0
-    except Exception as e:
-        rprint(f"[red]✗ npm install failed: {e}[/red]")
-        # Try alternative: node npm install
+    if not missing:
+        mineflayer_path = node_modules / "mineflayer"
         try:
-            if node_bin:
-                # find npm-cli.js
-                npm_cli_candidates = [
-                    Path(node_bin).parent.parent / "lib" / "node_modules" / "npm" / "bin" / "npm-cli.js",
-                    ROOT_DIR / "nodejs" / "lib" / "node_modules" / "npm" / "bin" / "npm-cli.js",
-                    Path(f"node-v22.11.0-linux-x64/lib/node_modules/npm/bin/npm-cli.js"),
-                ]
-                for cli in npm_cli_candidates:
-                    if cli.exists():
-                        proc = subprocess.run([node_bin, str(cli), "install", "--production", "--no-fund", "--no-audit"], cwd=str(ROOT_DIR), timeout=300)
-                        return proc.returncode == 0
-        except Exception as e2:
-            rprint(f"[red]npm fallback failed: {e2}[/red]")
+            if mineflayer_path.exists() and (mineflayer_path / "package.json").exists():
+                return True
+            else:
+                missing = ["mineflayer"]
+        except:
+            missing = ["mineflayer"]
+
+    if no_install:
+        rprint(f"[yellow]⚠ Thiếu modules: {', '.join(missing)} nhưng --no-install bật[/yellow]")
         return False
+
+    rprint(f"[cyan]📦 Thiếu node_modules: {', '.join(missing)} — đang chạy npm install...[/cyan]")
+    rprint("[dim]  Nếu cài lâu, đợi 1-2 phút, mineflayer khá nặng...[/dim]" if HAS_RICH else "  Installing, please wait 1-2 min...")
+
+    node_bin = find_node_bin()
+    npm_candidates = []
+    if node_bin:
+        npm_candidates.extend([
+            str(Path(node_bin).parent / "npm"),
+            str(Path(node_bin).parent / "npm-cli.js"),
+        ])
+    npm_candidates.extend([
+        shutil.which("npm") or "",
+        "/usr/local/bin/npm",
+        "/usr/bin/npm",
+        str(ROOT_DIR / "nodejs" / "bin" / "npm"),
+        str(ROOT_DIR / "node-v22.11.0-linux-x64" / "lib" / "node_modules" / "npm" / "bin" / "npm-cli.js"),
+        "npm",
+    ])
+
+    npm_bin = None
+    for cand in npm_candidates:
+        if not cand:
+            continue
+        if "npm-cli.js" in cand:
+            if node_bin and Path(cand).exists():
+                npm_bin = cand
+                break
+        else:
+            if "/" in cand:
+                if Path(cand).exists():
+                    npm_bin = cand
+                    break
+            else:
+                whe = shutil.which(cand)
+                if whe:
+                    npm_bin = whe
+                    break
+
+    if not npm_bin:
+        npm_bin = "npm"
+
+    rprint(f"[dim]Dùng npm: {npm_bin} | node: {node_bin}[/dim]" if HAS_RICH else f"Using npm {npm_bin}")
+
+    install_commands = []
+    if "npm-cli.js" in str(npm_bin) and node_bin:
+        install_commands.append([node_bin, npm_bin, "install", "--production", "--no-fund", "--no-audit", "--no-optional"])
+        install_commands.append([node_bin, npm_bin, "install", "--no-fund", "--no-audit"])
+    else:
+        install_commands.append([npm_bin, "install", "--production", "--no-fund", "--no-audit", "--no-optional"])
+        install_commands.append([npm_bin, "install", "--no-fund", "--no-audit"])
+        if node_bin:
+            for cli_path in [
+                Path(node_bin).parent.parent / "lib" / "node_modules" / "npm" / "bin" / "npm-cli.js",
+                ROOT_DIR / "nodejs" / "lib" / "node_modules" / "npm" / "bin" / "npm-cli.js",
+                ROOT_DIR / "node-v22.11.0-linux-x64" / "lib" / "node_modules" / "npm" / "bin" / "npm-cli.js",
+            ]:
+                if cli_path.exists():
+                    install_commands.append([node_bin, str(cli_path), "install", "--production", "--no-fund", "--no-audit"])
+                    break
+
+    if node_modules.exists():
+        try:
+            count = len(list(node_modules.iterdir()))
+            if count < 5:
+                rprint(f"[yellow]⚠ node_modules chỉ có {count} files, có vẻ hỏng, xóa và cài lại...[/yellow]")
+                shutil.rmtree(str(node_modules), ignore_errors=True)
+        except Exception as e:
+            rprint(f"[yellow]Không đếm được node_modules: {e}[/yellow]")
+
+    success = False
+    for cmd in install_commands:
+        try:
+            rprint(f"[dim]Chạy: {' '.join(str(c) for c in cmd)}[/dim]" if HAS_RICH else f"Running: {' '.join(str(c) for c in cmd)}")
+            proc = subprocess.run(
+                cmd,
+                cwd=str(ROOT_DIR),
+                timeout=300,
+            )
+            if proc.returncode == 0:
+                still_missing = []
+                for mod in required_modules:
+                    if not (node_modules / mod).exists():
+                        still_missing.append(mod)
+                if not still_missing:
+                    rprint(f"[green]✅ npm install thành công![/green]")
+                    success = True
+                    break
+                else:
+                    rprint(f"[yellow]⚠ Vẫn thiếu {still_missing} sau install, thử lại...[/yellow]")
+            else:
+                rprint(f"[yellow]Lệnh {' '.join(str(c) for c in cmd)} thoát mã {proc.returncode}, thử cách khác...[/yellow]")
+        except subprocess.TimeoutExpired:
+            rprint(f"[red]npm install timeout 5 phút, có thể mạng chậm[/red]")
+        except Exception as e:
+            rprint(f"[red]✗ npm install lỗi: {e}, thử cách khác...[/red]")
+
+    if not success:
+        rprint("[red]✗ Tất cả cách npm install đều thất bại![/red]")
+        rprint("[yellow]Thử thủ công trong console Pterodactyl: npm install[/yellow]")
+        return False
+
+    return True
 
 def get_port_from_config(cfg, cli_port=None):
     """Resolve port with priority: cli --port > env PORT/SERVER_PORT > config.json webPort > 3000"""

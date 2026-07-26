@@ -93,11 +93,23 @@ if command -v npm >/dev/null 2>&1 || [ -f "./nodejs/bin/npm" ]; then
   if [ -f "./nodejs/bin/npm" ]; then
     export PATH="$PWD/nodejs/bin:$PATH"
   fi
-  if [ ! -d "node_modules" ]; then
-    npm install --production --no-fund --no-audit || ./nodejs/bin/npm install --production --no-fund --no-audit || true
+  # Check if critical modules exist, if not, force install
+  MISSING=0
+  for mod in chalk express mineflayer socket.io; do
+    if [ ! -d "node_modules/$mod" ]; then
+      MISSING=1
+      echo "⚠ Thiếu module $mod"
+    fi
+  done
+  if [ ! -d "node_modules" ] || [ "$MISSING" = "1" ]; then
+    echo "📦 Cài lại node_modules (thiếu module)..."
+    echo "   npm install --production --no-fund --no-audit"
+    npm install --production --no-fund --no-audit || ./nodejs/bin/npm install --production --no-fund --no-audit || npm install --no-fund --no-audit || echo "⚠ npm install thất bại, sẽ thử lại trong Python"
+  else
+    echo "✅ node_modules đã có đủ"
   fi
 else
-  echo "⚠ npm không có, bỏ qua"
+  echo "⚠ npm không có, bỏ qua - Python sẽ tự cài"
 fi
 
 echo "🚀 Starting Antares..."
