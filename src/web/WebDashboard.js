@@ -431,17 +431,48 @@ class WebDashboard {
     }, metricsInterval);
     if (this._statusInterval.unref) this._statusInterval.unref();
     if (this._metricsInterval.unref) this._metricsInterval.unref();
-    this.expressServer.listen(this.port, () => {
-      const url = `http://localhost:${this.port}`;
+    // Bind to 0.0.0.0 explicitly for Pterodactyl Docker networking
+    // Pterodactyl maps container port to host port, must listen on 0.0.0.0 not 127.0.0.1
+    const bindHost = process.env.BIND_HOST || process.env.HOST || '0.0.0.0';
+    this.expressServer.listen(this.port, bindHost, () => {
+      const localUrl = `http://localhost:${this.port}`;
+      const bindUrl = `http://${bindHost}:${this.port}`;
+      // Try to detect external Pterodactyl allocation
+      const serverIp = process.env.SERVER_IP || process.env.P_SERVER_IP || '';
+      const serverPort = process.env.SERVER_PORT || process.env.P_SERVER_PORT || this.port;
+      const externalIp = process.env.EXTERNAL_IP || serverIp || 'play1.nvnmc.top';
+      
       if (this.autoExe) {
         console.log(`\x1b[36m╔══════════════════════════════════════╗\x1b[0m`);
         console.log(`\x1b[36m║  ⬡   Bot Manager — Antares       ║\x1b[0m`);
         console.log(`\x1b[36m╠══════════════════════════════════════╣\x1b[0m`);
         console.log(`\x1b[36m║  Web Dashboard:                      ║\x1b[0m`);
-        console.log(`\x1b[36m║  \x1b[33m${url.padEnd(36)}\x1b[36m║\x1b[0m`);
+        console.log(`\x1b[36m║  \x1b[33m${localUrl.padEnd(36)}\x1b[36m║\x1b[0m`);
+        console.log(`\x1b[36m║  \x1b[33m${bindUrl.padEnd(36)}\x1b[36m║\x1b[0m`);
+        if (externalIp && serverPort) {
+          const extUrl = `http://${externalIp}:${serverPort}`;
+          console.log(`\x1b[36m║  \x1b[32m${extUrl.padEnd(36)}\x1b[36m║\x1b[0m`);
+        }
         console.log(`\x1b[36m╚══════════════════════════════════════╝\x1b[0m`);
+        console.log(`\x1b[33m[INFO] Nếu ERR_CONNECTION_TIMED_OUT khi vào ${externalIp}:${serverPort}:\x1b[0m`);
+        console.log(`\x1b[33m  - Kiểm tra Cloudflare: port 26009 không được Cloudflare proxy cho phép (chỉ 80,443,2053,2083,2087,2096,8443...)\x1b[0m`);
+        console.log(`\x1b[33m  - Thử http:// không phải https://\x1b[0m`);
+        console.log(`\x1b[33m  - Hỏi admin nvnmc.top tắt Cloudflare proxy (đám mây xám) cho play1.nvnmc.top\x1b[0m`);
+        console.log(`\x1b[33m  - Hoặc dùng IP trực tiếp thay vì domain, hoặc đổi port sang 2053/2083 được Cloudflare cho phép\x1b[0m`);
       } else {
-        console.log(`\x1b[36m[Dashboard] Web UI: ${url}\x1b[0m`);
+        console.log(`\x1b[36m[Dashboard] Web UI: ${localUrl} (bind ${bindUrl})\x1b[0m`);
+        if (externalIp) {
+          console.log(`\x1b[36m[Dashboard] External: http://${externalIp}:${serverPort}\x1b[0m`);
+        }
+      }
+    });
+    this.expressServer.on('error', (err) => {
+      console.error(`\x1b[31m[Dashboard] Failed to bind ${bindHost}:${this.port} - ${err.message}\x1b[0m`);
+      if (err.code === 'EADDRINUSE') {
+        console.error(`\x1b[33mPort ${this.port} đang bị chiếm! Thử đổi PORT env hoặc --port khác\x1b[0m`);
+      }
+      if (err.code === 'EACCES') {
+        console.error(`\x1b[33mKhông có quyền bind port ${this.port} (cần >1024 hoặc chạy root)\x1b[0m`);
       }
     });
   }
