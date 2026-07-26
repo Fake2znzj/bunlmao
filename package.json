@@ -2,7 +2,7 @@
   "name": "bot-kingsmp",
   "version": "1.0.0",
   "engines": {
-    "node": ">=18.0.0",
+    "node": ">=22.0.0",
     "npm": ">=9.0.0"
   },
   "main": "main.js",
@@ -19,7 +19,7 @@
     "chalk": "^4.1.2",
     "cli-table3": "^0.6.5",
     "express": "^5.2.1",
-    "mineflayer": "^4.0.0",
+    "mineflayer": "4.37.1",
     "socket.io": "^4.8.3",
     "strip-ansi": "^7.2.0"
   }
