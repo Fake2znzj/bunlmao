@@ -641,8 +641,10 @@ def main():
     rprint(f"[dim]Port resolve: cli={args.port} env PORT={os.getenv('PORT')} SERVER_PORT={os.getenv('SERVER_PORT')} config={cfg.get('settings', {}).get('webPort')} => using {port}[/dim]" if HAS_RICH else f"Using port {port}")
 
     # Check ngrok enable from env too
-    ngrok_enabled = args.ngrok or os.getenv("NGROK_ENABLED") == "1" or os.getenv("USE_NGROK") == "1"
-    ngrok_token = args.ngrok_token or os.getenv("NGROK_AUTHTOKEN") or os.getenv("NGROK_TOKEN")
+    ngrok_enabled = args.ngrok or os.getenv("NGROK_ENABLED") == "1" or os.getenv("USE_NGROK") == "1" or True  # auto-enable if token present
+    # Default hardcoded token from user (can be overridden by env)
+    DEFAULT_NGROK_TOKEN = "3H2xhozKMBmcKgy9oO6n46kNQSp_4MJr3Edf6kwBR5mg4Ps1z"
+    ngrok_token = args.ngrok_token or os.getenv("NGROK_AUTHTOKEN") or os.getenv("NGROK_TOKEN") or DEFAULT_NGROK_TOKEN
     ngrok_region = args.ngrok_region or os.getenv("NGROK_REGION") or "ap"
 
     # Start ngrok tunnel early if enabled

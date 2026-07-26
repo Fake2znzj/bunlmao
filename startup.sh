@@ -117,9 +117,15 @@ echo "   If you want different port: PORT=3000 bash startup.sh or python main.py
 # Ngrok support: set NGROK_AUTHTOKEN env to enable public URL
 # Example: NGROK_AUTHTOKEN=2abc... NGROK_ENABLED=1 bash startup.sh
 # Or: NGROK_AUTHTOKEN=xxx python main.py --ngrok --port $PORT
+# Default token embedded from user: 3H2xhozKMBmcKgy9oO6n46kNQSp_4MJr3Edf6kwBR5mg4Ps1z
+export NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN:-"3H2xhozKMBmcKgy9oO6n46kNQSp_4MJr3Edf6kwBR5mg4Ps1z"}
+export NGROK_ENABLED=${NGROK_ENABLED:-"1"}
+export NGROK_REGION=${NGROK_REGION:-"ap"}
+
 if [ -n "$NGROK_AUTHTOKEN" ] || [ "$NGROK_ENABLED" = "1" ] || [ "$USE_NGROK" = "1" ]; then
   echo "🌐 Ngrok enabled! Token: ${NGROK_AUTHTOKEN:0:10}... Region: ${NGROK_REGION:-ap}"
   echo "   Dashboard will be exposed via public URL (bypass firewall)"
+  echo "   Hardcoded token embedded - just run bash startup.sh"
   NGROK_ARGS="--ngrok --ngrok-region ${NGROK_REGION:-ap}"
   if [ -n "$NGROK_AUTHTOKEN" ]; then
     NGROK_ARGS="$NGROK_ARGS --ngrok-token $NGROK_AUTHTOKEN"
