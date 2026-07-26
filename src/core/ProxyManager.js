@@ -754,5 +754,181 @@ class ProxyManager {
     }
     return results;
   }
+
+  // ===== ASIA LOW PING 0-175ms FILTER + BOT TO SERVER PING =====
+  static isLowPingAsia(ping, maxMs = 175) {
+    return ping >= 0 && ping <= maxMs;
+  }
+
+  getLowPingProxies(maxMs = 175) {
+    return this.list.filter(p => p.ping >= 0 && p.ping <= maxMs && this._isUsable(p))
+      .sort((a,b) => a.ping - b.ping);
+  }
+
+  // Test proxy to specific Minecraft server (bot -> server ping via proxy)
+  async testToMinecraftServer(idx, targetHost, targetPort = 25565) {
+    const p = this.list[idx];
+    if (!p) return { ok: false, error: 'Invalid index' };
+    const start = Date.now();
+    let sock = null;
+    try {
+      // Connect via proxy to MC server
+      sock = await this.connect(p, targetHost, targetPort);
+      const ping = Date.now() - start;
+      try { sock.destroy(); } catch {}
+      // Update proxy ping with server ping (more relevant)
+      p.serverPing = ping;
+      p.serverHost = `${targetHost}:${targetPort}`;
+      p.lastServerPing = Date.now();
+      this.markLive(idx, ping);
+      return { 
+        ok: true, 
+        ping, 
+        serverPing: ping,
+        type: p.type, 
+        target: `${targetHost}:${targetPort}`,
+        quality: ProxyManager.gradeQuality(ping),
+        isLowPing: ping <= 175,
+        isExcellent: ping <= 50,
+        isGood: ping <= 100
+      };
+    } catch (e) {
+      if (sock) { try { sock.destroy(); } catch {} }
+      const status = e.message.includes('auth') ? 'auth_fail' : e.message.includes('timeout') ? 'timeout' : 'die';
+      this.markDead(idx, status);
+      return { ok: false, error: e.message, status, target: `${targetHost}:${targetPort}` };
+    }
+  }
+
+  async testAllToMinecraftServer(targetHost, targetPort = 25565, options = {}) {
+    const {
+      maxMs = 175,
+      filterLowPing = true,
+      concurrency = 5,
+      onlyLive = false
+    } = options;
+
+    let proxiesToTest = this.list;
+    if (onlyLive) {
+      proxiesToTest = this._getLiveProxies();
+    }
+
+    const results = [];
+    const lowPingResults = [];
+
+    for (let i = 0; i < proxiesToTest.length; i += concurrency) {
+      const batch = proxiesToTest.slice(i, i + concurrency).map(async (proxy) => {
+        const idx = this.list.indexOf(proxy);
+        if (idx === -1) return null;
+        const res = await this.testToMinecraftServer(idx, targetHost, targetPort);
+        return { idx, proxy: this._summarize(proxy, idx), result: res };
+      });
+
+      const batchResults = await Promise.all(batch);
+      for (const r of batchResults) {
+        if (!r) continue;
+        results.push(r);
+        if (r.result.ok && r.result.ping <= maxMs) {
+          lowPingResults.push(r);
+        }
+      }
+      // Small delay to avoid overwhelming
+      await new Promise(r => setTimeout(r, 200));
+    }
+
+    // Sort low ping by ping ascending
+    lowPingResults.sort((a,b) => a.result.ping - b.result.ping);
+
+    return {
+      ok: true,
+      target: `${targetHost}:${targetPort}`,
+      maxMs,
+      totalTested: results.length,
+      totalLowPing: lowPingResults.length,
+      lowPingProxies: lowPingResults,
+      allResults: filterLowPing ? lowPingResults : results,
+      summary: {
+        excellent: lowPingResults.filter(r => r.result.ping <= 50).length,
+        good: lowPingResults.filter(r => r.result.ping > 50 && r.result.ping <= 100).length,
+        fair: lowPingResults.filter(r => r.result.ping > 100 && r.result.ping <= 175).length,
+        totalLow: lowPingResults.length
+      }
+    };
+  }
+
+  async fetchAndTestLowPingAsia(apiUrl, options = {}) {
+    const {
+      tag = 'asia-lowping',
+      limit = 100,
+      maxMs = 175,
+      targetHost = null, // If provided, test to MC server, else test to 1.1.1.1
+      targetPort = 25565,
+      autoFilter = true
+    } = options;
+
+    // First fetch
+    const fetchRes = await this.fetchFreeProxiesFromUrl(apiUrl, {
+      tag,
+      limit: limit * 2, // Fetch more to account for filtering
+      defaultType: options.type || 'socks5',
+      autoTest: false // We'll test manually with filter
+    });
+
+    if (!fetchRes.ok) return fetchRes;
+
+    // Now test fetched proxies
+    const addedIds = fetchRes.addedIds || [];
+    const addedIndexes = addedIds.map(id => this.list.findIndex(p => p.id === id)).filter(idx => idx !== -1);
+
+    let testResults;
+    if (targetHost) {
+      // Test to Minecraft server
+      const tempResults = [];
+      for (const idx of addedIndexes) {
+        const res = await this.testToMinecraftServer(idx, targetHost, targetPort);
+        tempResults.push({ idx, result: res });
+        if (autoFilter && !res.ok) continue;
+      }
+      const lowPing = tempResults.filter(r => r.result.ok && r.result.ping <= maxMs);
+      // Remove high ping proxies if autoFilter
+      if (autoFilter) {
+        for (const r of tempResults) {
+          if (!r.result.ok || r.result.ping > maxMs) {
+            // Keep but mark as high ping? Or remove? Let's keep but marked
+            // Optionally remove high ping: this.removeByIndex(r.idx)
+          }
+        }
+      }
+      testResults = {
+        ok: true,
+        target: `${targetHost}:${targetPort}`,
+        maxMs,
+        totalTested: tempResults.length,
+        totalLowPing: lowPing.length,
+        lowPingProxies: lowPing.sort((a,b) => a.result.ping - b.result.ping),
+        fetchResult: fetchRes
+      };
+    } else {
+      // Test to 1.1.1.1
+      const tempResults = [];
+      for (const idx of addedIndexes) {
+        const res = await this.test(idx);
+        tempResults.push({ idx, result: res });
+      }
+      const lowPing = tempResults.filter(r => r.result.ok && r.result.ping <= maxMs);
+      testResults = {
+        ok: true,
+        maxMs,
+        totalTested: tempResults.length,
+        totalLowPing: lowPing.length,
+        lowPingProxies: lowPing.sort((a,b) => a.result.ping - b.result.ping),
+        fetchResult: fetchRes
+      };
+    }
+
+    return testResults;
+  }
+
+
 }
 module.exports = ProxyManager;
